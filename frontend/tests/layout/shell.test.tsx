@@ -179,12 +179,13 @@ describe('Application Shell, Router & Storage Banner (Milestone 1 — Phase 6, S
       expect(html).toContain('View Checklist')
     })
 
-    it('renders the Trip Wizard placeholder page at "/wizard/new"', () => {
+    it('renders the Trip Wizard page at "/wizard/new"', () => {
       const html = renderAppWithRoute('/wizard/new')
       expect(html).toContain('Plan a New Journey')
-      expect(html).toContain('5-Step Progressive Disclosure')
-      expect(html).toContain('Step 1:')
-      expect(html).toContain('Step 5:')
+      expect(html).toContain('Trip Wizard')
+      expect(html).toContain('Step 1 of 5')
+      expect(html).toContain('Basics')
+      expect(html).toContain('Travellers')
       expect(html).toContain('Back to My Trips')
     })
 
