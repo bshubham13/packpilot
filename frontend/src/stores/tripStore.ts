@@ -17,6 +17,7 @@ export interface TripState {
   trips: Trip[]
   activeTrip: Trip | null
   isLoading: boolean
+  isInitialized: boolean
   error: string | null
   storageType: StorageType
   isStorageAvailable: boolean
@@ -32,34 +33,56 @@ export interface TripState {
   clearError: () => void
 }
 
+let activeInitPromise: Promise<void> | null = null
+
 export const useTripStore = create<TripState>((set, get) => ({
   trips: [],
   activeTrip: null,
   isLoading: false,
+  isInitialized: false,
   error: null,
   storageType: 'memory',
   isStorageAvailable: false,
 
   initialize: async (forcedType?: StorageType) => {
-    set({ isLoading: true, error: null })
-    try {
-      const storage = await createStorageContext(forcedType)
-      const trips = await storage.trips.getAllTrips()
-      set({
-        trips,
-        storageType: storage.storageType,
-        isStorageAvailable: storage.isStorageAvailable,
-        isLoading: false,
-      })
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : 'Storage initialization failed'
-      set({
-        error: errorMsg,
-        isLoading: false,
-        storageType: 'memory',
-        isStorageAvailable: false,
-      })
+    // Prevent redundant initialization if already initialized
+    if (get().isInitialized && !forcedType) {
+      return
     }
+
+    // Deduplicate in-flight initialization (e.g. React StrictMode concurrent mount)
+    if (activeInitPromise && !forcedType) {
+      return activeInitPromise
+    }
+
+    set({ isLoading: true, error: null })
+
+    activeInitPromise = (async () => {
+      try {
+        const storage = await createStorageContext(forcedType)
+        const trips = await storage.trips.getAllTrips()
+        set({
+          trips,
+          storageType: storage.storageType,
+          isStorageAvailable: storage.isStorageAvailable,
+          isInitialized: true,
+          isLoading: false,
+        })
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : 'Storage initialization failed'
+        set({
+          error: errorMsg,
+          isInitialized: true,
+          isLoading: false,
+          storageType: 'memory',
+          isStorageAvailable: false,
+        })
+      } finally {
+        activeInitPromise = null
+      }
+    })()
+
+    return activeInitPromise
   },
 
   loadTrips: async () => {
