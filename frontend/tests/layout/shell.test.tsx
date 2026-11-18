@@ -189,14 +189,11 @@ describe('Application Shell, Router & Storage Banner (Milestone 1 — Phase 6, S
       expect(html).toContain('Back to My Trips')
     })
 
-    it('renders the Checklist placeholder page at "/trips/:id" with tripId parameter', () => {
+    it('renders the functional Checklist page at "/trips/:id"', () => {
       const html = renderAppWithRoute('/trips/trip-expedition-99')
-      expect(html).toContain('Trip Packing Checklist')
-      expect(html).toContain('Trip Reference ID: trip-expedition-99')
-      expect(html).toContain('Interactive Packing Experience')
-      expect(html).toContain('Category Accordions')
-      expect(html).toContain('Readiness Score')
-      expect(html).toContain('Weight Estimator')
+      expect(html).toContain('Journey Not Found')
+      expect(html).toContain('Trip Record Unavailable')
+      expect(html).toContain('Back to My Trips')
     })
   })
 
