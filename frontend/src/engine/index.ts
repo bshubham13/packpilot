@@ -11,13 +11,17 @@
 
 import type {
   TripConfig,
+  Trip,
   PackingItem,
   DismissedItemRecord,
   RecommendationCandidate,
+  NormalizedTripContext,
+  JourneyContext,
 } from '../types'
 import { calculateDurationDays } from '../utils/dates'
 import { evaluateBaseRules } from './rules/baseRules'
 import { evaluateTransportRules } from './rules/transportRules'
+import { evaluateJourneyRules } from './rules/journeyRules'
 import { evaluateClimateRules } from './rules/climateRules'
 import { evaluateAccommodationRules } from './rules/accommodationRules'
 import { evaluateActivityRules } from './rules/activityRules'
@@ -26,18 +30,21 @@ import { evaluateCompositionRules } from './rules/compositionRules'
 import { deduplicateCandidates } from './deduplication'
 import { calculateItemQuantity } from './quantityCalculator'
 import { mergeChecklists } from './reconciler'
+import { resolveFallbackJourneyContext } from './fallbackContext'
 
 export * from './deduplication'
 export * from './reconciler'
 export * from './quantityCalculator'
 export * from './referenceWeights'
 export * from './rules/journeyRules'
+export * from './fallbackContext'
 
 export interface RecommendationPipelineOptions {
   existingItems?: PackingItem[]
   dismissedRecords?: DismissedItemRecord[]
   tripId?: string
   now?: string
+  normalizedContext?: NormalizedTripContext
 }
 
 export interface RecommendationResult {
@@ -82,6 +89,7 @@ export function generateRecommendations(
   let dismissedRecords: DismissedItemRecord[] = []
   let tripId = tripIdArg
   let now = new Date().toISOString()
+  let normalizedContext: NormalizedTripContext | undefined = undefined
 
   if (Array.isArray(optionsOrExisting)) {
     existingItems = optionsOrExisting
@@ -92,6 +100,7 @@ export function generateRecommendations(
     dismissedRecords = optionsOrExisting.dismissedRecords || []
     tripId = optionsOrExisting.tripId || tripIdArg
     now = optionsOrExisting.now || now
+    normalizedContext = optionsOrExisting.normalizedContext
   }
 
   // 1. Calculate trip duration in days
@@ -100,10 +109,17 @@ export function generateRecommendations(
   // 2. Resolve laundry availability
   const hasLaundry = determineHasLaundry(tripConfig)
 
-  // 3. Execute all modular recommendation rule engines
+  // 3. Resolve Journey Context (prefer supplied normalizedContext, then trip.normalizedContext, then pure fallback)
+  const journeyContext: JourneyContext =
+    normalizedContext?.journey ??
+    (tripConfig as Trip).normalizedContext?.journey ??
+    resolveFallbackJourneyContext(tripConfig)
+
+  // 4. Execute all modular recommendation rule engines
   const rawCandidates: RecommendationCandidate[] = [
     ...evaluateBaseRules(),
     ...evaluateTransportRules(tripConfig),
+    ...evaluateJourneyRules(journeyContext, tripConfig.travellers),
     ...evaluateClimateRules(tripConfig),
     ...evaluateAccommodationRules(tripConfig),
     ...evaluateActivityRules(tripConfig),
