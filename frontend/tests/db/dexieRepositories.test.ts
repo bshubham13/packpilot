@@ -95,6 +95,81 @@ describe('Dexie IndexedDB Repositories', () => {
       expect(trip?.name).toBe('Updated Alps Trek')
     })
 
+    it('atomically updates a trip and replaces its checklist items in a single transaction', async () => {
+      // Setup trip-1 with 2 initial items and trip-2 with 1 item
+      await tripsRepo.saveTripWithItems(createSampleTrip('trip-1'), [
+        createSampleItem('item-1', 'trip-1', 'wear-socks'),
+        createSampleItem('item-2', 'trip-1', 'wear-tshirt'),
+      ])
+      await tripsRepo.saveTripWithItems(createSampleTrip('trip-2'), [
+        createSampleItem('item-3', 'trip-2', 'wear-hat'),
+      ])
+
+      // Reconciled items for trip-1 (replaces socks & tshirt with jacket)
+      const reconciledItems = [
+        createSampleItem('item-4', 'trip-1', 'wear-jacket'),
+      ]
+
+      await tripsRepo.atomicUpdateTripAndItems(
+        'trip-1',
+        { name: 'Alps Winter Trek', durationDays: 10 },
+        reconciledItems
+      )
+
+      // Verify trip-1 metadata updated
+      const updatedTrip = await tripsRepo.getTripById('trip-1')
+      expect(updatedTrip?.name).toBe('Alps Winter Trek')
+      expect(updatedTrip?.durationDays).toBe(10)
+
+      // Verify trip-1 items replaced
+      const trip1Items = await itemsRepo.getItemsForTrip('trip-1')
+      expect(trip1Items).toHaveLength(1)
+      expect(trip1Items[0].itemSlug).toBe('wear-jacket')
+
+      // Verify trip-2 items remain completely isolated and untouched
+      const trip2Items = await itemsRepo.getItemsForTrip('trip-2')
+      expect(trip2Items).toHaveLength(1)
+      expect(trip2Items[0].itemSlug).toBe('wear-hat')
+    })
+
+    it('rolls back both trip updates and item mutations if item persistence fails inside atomic transaction', async () => {
+      await tripsRepo.saveTripWithItems(createSampleTrip('trip-1'), [
+        createSampleItem('item-1', 'trip-1', 'wear-socks'),
+      ])
+
+      // Spy on db.items.bulkPut to simulate transaction failure
+      const originalBulkPut = db.items.bulkPut.bind(db.items)
+      db.items.bulkPut = (() => {
+        throw new Error('Disk write error during item bulkPut')
+      }) as unknown as typeof db.items.bulkPut
+
+      await expect(
+        tripsRepo.atomicUpdateTripAndItems(
+          'trip-1',
+          { name: 'This Should Roll Back' },
+          [createSampleItem('item-2', 'trip-1', 'wear-boots')]
+        )
+      ).rejects.toThrow('Disk write error during item bulkPut')
+
+      // Restore bulkPut
+      db.items.bulkPut = originalBulkPut
+
+      // Verify trip was rolled back to original name
+      const trip = await tripsRepo.getTripById('trip-1')
+      expect(trip?.name).toBe('Swiss Alps Hiking')
+
+      // Verify original items were preserved and not deleted
+      const items = await itemsRepo.getItemsForTrip('trip-1')
+      expect(items).toHaveLength(1)
+      expect(items[0].itemSlug).toBe('wear-socks')
+    })
+
+    it('throws when atomicUpdateTripAndItems is called on a non-existent trip', async () => {
+      await expect(
+        tripsRepo.atomicUpdateTripAndItems('non-existent', { name: 'Ghost' }, [])
+      ).rejects.toThrow('Trip not found: non-existent')
+    })
+
     it('cascades deletion to child items preventing orphaned records', async () => {
       await tripsRepo.saveTripWithItems(createSampleTrip('trip-1'), [
         createSampleItem('item-1', 'trip-1'),

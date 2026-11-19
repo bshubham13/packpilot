@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useTripStore } from '../../src/stores/tripStore'
 import { useChecklistStore } from '../../src/stores/checklistStore'
 import { createStorageContext, setStorageContext, getStorageContext } from '../../src/db/factory'
-import type { TripConfig } from '../../src/types'
+import type { TripConfig, NormalizedTripContext } from '../../src/types'
 
 describe('Zustand Stores (useTripStore & useChecklistStore)', () => {
   beforeEach(async () => {
@@ -289,6 +289,71 @@ describe('Zustand Stores (useTripStore & useChecklistStore)', () => {
       // Packed state preserved
       const packedItem = useChecklistStore.getState().items.find((i) => i.id === first.id)
       expect(packedItem?.packedQuantity).toBeGreaterThan(0)
+    })
+
+    it('regenerates checklist reusing persisted normalizedContext without making network calls', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      const storage = getStorageContext()
+
+      const trip = await useTripStore.getState().createTrip(sampleConfig)
+
+      // Attach a normalizedContext with destination driving mobility to the persisted trip
+      const mockContext: NormalizedTripContext = {
+        contextVersion: '2.0.0',
+        contextState: 'current',
+        tripId: trip.id,
+        name: trip.name,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+        durationDays: 7,
+        travellers: trip.travellers,
+        hasLaundryAccess: false,
+        activities: trip.activities,
+        baggageConfig: trip.baggageConfig,
+        personalPreferences: trip.personalPreferences,
+        journey: {
+          destination: { city: { id: 'bergen', name: 'Bergen', country: 'Norway', countryCode: 'NO' } },
+          classification: 'intercity',
+          straightLineDistanceKm: 1200,
+          isHeuristicDistance: true,
+          overnightSelection: 'no',
+          isOvernightTransit: false,
+          isOvernightResolved: true,
+          primaryTransport: 'flight',
+          destinationMobility: { isDrivingAtDestination: true },
+          secondaryTransportModes: [],
+          provenance: { distanceMethod: 'haversine', retrievalMethod: 'cache', availability: 'available' },
+        },
+        environment: {
+          daily: [],
+          summary: {},
+          hasFullForecastCoverage: false,
+          hasPartialForecastCoverage: false,
+          contextProvenance: { provider: 'none', retrievalMethod: 'offline_fallback', source: 'none', availability: 'unresolved_location', confidence: 'unavailable' },
+          attribution: 'Weather data by Open-Meteo.com',
+        },
+        contextGeneratedAt: '2026-07-01T00:00:00Z',
+      }
+
+      await storage.trips.updateTrip(trip.id, { normalizedContext: mockContext })
+
+      await useChecklistStore.getState().loadItems(trip.id)
+      expect(useChecklistStore.getState().items.some((i) => i.itemSlug === 'doc-driver-licence')).toBe(false)
+
+      // Reset fetch spy counter before manual regeneration
+      fetchSpy.mockClear()
+
+      // Manual regeneration
+      await useChecklistStore.getState().regenerateChecklist(sampleConfig)
+
+      // Zero network calls made
+      expect(fetchSpy).not.toHaveBeenCalled()
+
+      // Reused persisted normalizedContext to evaluate journeyRules: driver licence now recommended!
+      const items = useChecklistStore.getState().items
+      const driverLicence = items.find((i) => i.itemSlug === 'doc-driver-licence')
+      expect(driverLicence).toBeDefined()
+      expect(driverLicence?.priority).toBe('critical')
     })
 
     it('manages UI filter and search state cleanly', () => {

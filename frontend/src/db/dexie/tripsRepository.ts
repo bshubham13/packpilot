@@ -47,6 +47,30 @@ export class DexieTripsRepository implements ITripsRepository {
     await this.db.trips.put(updated)
   }
 
+  async atomicUpdateTripAndItems(
+    tripId: string,
+    tripUpdates: Partial<Trip>,
+    reconciledItems: PackingItem[]
+  ): Promise<void> {
+    await this.db.transaction('rw', [this.db.trips, this.db.items], async () => {
+      const existing = await this.db.trips.get(tripId)
+      if (!existing) {
+        throw new Error(`Trip not found: ${tripId}`)
+      }
+      const updated: Trip = {
+        ...existing,
+        ...tripUpdates,
+        id: tripId, // Preserve primary key
+        updatedAt: new Date().toISOString(),
+      }
+      await this.db.trips.put(updated)
+      await this.db.items.where('tripId').equals(tripId).delete()
+      if (reconciledItems && reconciledItems.length > 0) {
+        await this.db.items.bulkPut(reconciledItems)
+      }
+    })
+  }
+
   async deleteTrip(id: string): Promise<void> {
     // Atomic cascade: delete trip and all its child items in a single transaction (no orphaned items)
     await this.db.transaction('rw', [this.db.trips, this.db.items], async () => {

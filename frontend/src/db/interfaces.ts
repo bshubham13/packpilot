@@ -10,6 +10,11 @@ export interface ITripsRepository {
   getTripById(id: string): Promise<Trip | null>
   saveTripWithItems(trip: Trip, items: PackingItem[]): Promise<void>
   updateTrip(id: string, updates: Partial<Trip>): Promise<void>
+  atomicUpdateTripAndItems(
+    tripId: string,
+    tripUpdates: Partial<Trip>,
+    reconciledItems: PackingItem[]
+  ): Promise<void>
   deleteTrip(id: string): Promise<void>
   duplicateTrip(id: string, newId?: string, newName?: string): Promise<Trip>
 }
