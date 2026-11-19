@@ -70,4 +70,32 @@ describe('Storage Factory & Health Probe (src/db/probe.ts & factory.ts)', () => 
     expect(secondContext.storageType).toBe('indexeddb')
     expect(secondContext).toBe(firstContext)
   })
+
+  it('deduplicates concurrent createStorageContext() calls and returns the identical context instance', async () => {
+    resetStorageContext()
+    const [c1, c2, c3] = await Promise.all([
+      createStorageContext(),
+      createStorageContext(),
+      createStorageContext(),
+    ])
+    expect(c1.storageType).toBe('indexeddb')
+    expect(c2).toBe(c1)
+    expect(c3).toBe(c1)
+  })
+
+  it('temporary getStorageContext() call before initialization does not lock mode to memory', async () => {
+    resetStorageContext()
+    // Premature call before async createStorageContext
+    const temp = getStorageContext()
+    expect(temp.storageType).toBe('memory')
+
+    // Now async initialization completes
+    const persistent = await createStorageContext()
+    expect(persistent.storageType).toBe('indexeddb')
+
+    // Subsequent calls to getStorageContext() return the persistent IndexedDB context
+    const active = getStorageContext()
+    expect(active.storageType).toBe('indexeddb')
+    expect(active).toBe(persistent)
+  })
 })
