@@ -384,5 +384,144 @@ describe('Zustand Stores (useTripStore & useChecklistStore)', () => {
 
       spy.mockRestore()
     })
+
+    describe('Bag Assignment & Persistence (Slice 6.4C-C2)', () => {
+      it('assigns item to cabin, checked, and returns to unassigned', async () => {
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const item = useChecklistStore.getState().items[0]
+        expect(item.bagAssignment).toBeUndefined()
+
+        // 1. Assign to cabin
+        await useChecklistStore.getState().setBagAssignment(item.id, 'cabin')
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBe('cabin')
+
+        // 2. Assign to checked
+        await useChecklistStore.getState().setBagAssignment(item.id, 'checked')
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBe('checked')
+
+        // 3. Return to unassigned
+        await useChecklistStore.getState().setBagAssignment(item.id, undefined)
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBeUndefined()
+      })
+
+      it('safely handles non-existent item ID in setBagAssignment', async () => {
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const initialItems = [...useChecklistStore.getState().items]
+
+        // Should return without throwing or modifying items
+        await expect(useChecklistStore.getState().setBagAssignment('non-existent-id', 'cabin')).resolves.not.toThrow()
+        expect(useChecklistStore.getState().items).toEqual(initialItems)
+      })
+
+      it('persists bag assignments in memory storage across reload', async () => {
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const [item1, item2] = useChecklistStore.getState().items
+
+        await useChecklistStore.getState().setBagAssignment(item1.id, 'cabin')
+        await useChecklistStore.getState().setBagAssignment(item2.id, 'checked')
+
+        // Clear in-memory store state to simulate reload
+        useChecklistStore.setState({ items: [], tripId: null })
+
+        // Reload from storage
+        await useChecklistStore.getState().loadItems(trip.id)
+        const reloadedItems = useChecklistStore.getState().items
+        expect(reloadedItems.find((i) => i.id === item1.id)?.bagAssignment).toBe('cabin')
+        expect(reloadedItems.find((i) => i.id === item2.id)?.bagAssignment).toBe('checked')
+      })
+
+      it('persists bag assignments in Dexie IndexedDB storage across reload', async () => {
+        const dbName = `DexieStoreTest_${Date.now()}_${Math.random()}`
+        const dexieStorage = await createStorageContext('indexeddb', dbName)
+        setStorageContext(dexieStorage)
+
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const item = useChecklistStore.getState().items[0]
+
+        await useChecklistStore.getState().setBagAssignment(item.id, 'cabin')
+
+        // Reload fresh from Dexie
+        useChecklistStore.setState({ items: [], tripId: null })
+        await useChecklistStore.getState().loadItems(trip.id)
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBe('cabin')
+
+        // Cleanup database
+        const db = (dexieStorage.trips as { db?: { delete: () => Promise<void> } }).db
+        if (db) await db.delete()
+      })
+
+      it('rolls back optimistic bag assignment when storage persistence fails', async () => {
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const item = useChecklistStore.getState().items[0]
+        expect(item.bagAssignment).toBeUndefined()
+
+        const storage = getStorageContext()
+        const spy = vi.spyOn(storage.items, 'saveItem').mockRejectedValueOnce(new Error('Disk write failure'))
+
+        await useChecklistStore.getState().setBagAssignment(item.id, 'checked')
+
+        // Rollback occurred
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBeUndefined()
+        expect(useChecklistStore.getState().error).toBe('Disk write failure')
+
+        spy.mockRestore()
+      })
+
+      it('extends updateItem to update bag assignment while preserving other fields', async () => {
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const item = useChecklistStore.getState().items[0]
+
+        // Update bag assignment via updateItem
+        const updated = await useChecklistStore.getState().updateItem(item.id, {
+          bagAssignment: 'cabin',
+        })
+        expect(updated?.bagAssignment).toBe('cabin')
+        expect(updated?.name).toBe(item.name)
+        expect(updated?.category).toBe(item.category)
+        expect(updated?.priority).toBe(item.priority)
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBe('cabin')
+      })
+
+      it('preserves existing bag assignment when updateItem modifies other fields', async () => {
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const item = useChecklistStore.getState().items[0]
+
+        // First set bag assignment to checked
+        await useChecklistStore.getState().setBagAssignment(item.id, 'checked')
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBe('checked')
+
+        // Update quantity and notes without providing bagAssignment
+        await useChecklistStore.getState().updateItem(item.id, {
+          quantity: 4,
+          notes: 'Special care needed',
+        })
+
+        const itemAfter = useChecklistStore.getState().items.find((i) => i.id === item.id)
+        expect(itemAfter?.effectiveQuantity).toBe(4)
+        expect(itemAfter?.notes).toBe('Special care needed')
+        expect(itemAfter?.bagAssignment).toBe('checked')
+      })
+
+      it('allows updateItem to explicitly reset bagAssignment to undefined', async () => {
+        const trip = await useTripStore.getState().createTrip(sampleConfig)
+        await useChecklistStore.getState().loadItems(trip.id)
+        const item = useChecklistStore.getState().items[0]
+
+        await useChecklistStore.getState().setBagAssignment(item.id, 'cabin')
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBe('cabin')
+
+        await useChecklistStore.getState().updateItem(item.id, {
+          bagAssignment: undefined,
+        })
+        expect(useChecklistStore.getState().items.find((i) => i.id === item.id)?.bagAssignment).toBeUndefined()
+      })
+    })
   })
 })

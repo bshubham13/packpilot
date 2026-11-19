@@ -31,6 +31,11 @@ import { useChecklistStore } from '../stores/checklistStore'
 import { Card, Button, Badge, Modal } from '../components/ui'
 import { formatDisplayDate } from '../utils/dates'
 import { calculateReadinessScore } from '../utils/scoring'
+import {
+  calculateLuggageWeight,
+  formatWeightDisplay,
+  deriveItemTotalWeightGrams,
+} from '../utils/weight'
 import type {
   PackingCategory,
   PackingItem,
@@ -38,6 +43,9 @@ import type {
   Trip,
   DismissedItemRecord,
   ReadinessScore,
+  BagAssignment,
+  WeightEstimate,
+  BaggageConfig,
 } from '../types'
 
 interface CategoryMeta {
@@ -127,16 +135,22 @@ function PriorityBadge({ priority }: { priority: ItemPriority }) {
 
 interface ItemRowProps {
   item: PackingItem
+  hasCabinBaggage?: boolean
+  hasCheckedBaggage?: boolean
   onTogglePacked: (itemId: string) => void
   onSetPackedQuantity: (itemId: string, qty: number) => void
+  onSetBagAssignment: (itemId: string, assignment: BagAssignment | undefined) => void
   onEdit: (item: PackingItem) => void
   onRemove: (item: PackingItem) => void
 }
 
 function ChecklistItemRow({
   item,
+  hasCabinBaggage = true,
+  hasCheckedBaggage = false,
   onTogglePacked,
   onSetPackedQuantity,
+  onSetBagAssignment,
   onEdit,
   onRemove,
 }: ItemRowProps) {
@@ -247,6 +261,83 @@ function ChecklistItemRow({
                 {`Customized: ${item.effectiveQuantity} (Recommended: ${item.generatedQuantity})`}
               </p>
             )}
+
+          {/* Bag Allocation Controls & Physical Weight Display */}
+          <div className="flex items-center gap-2 flex-wrap pt-1 text-xs">
+            <div
+              className="inline-flex items-center rounded-sm bg-sand/20 p-0.5 border border-sand/40 text-[11px]"
+              role="group"
+              aria-label={`Bag allocation for ${item.name}`}
+              data-testid={`bag-assignment-${item.id}`}
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  onSetBagAssignment(item.id, item.bagAssignment === 'cabin' ? undefined : 'cabin')
+                }
+                disabled={!hasCabinBaggage}
+                aria-pressed={item.bagAssignment === 'cabin'}
+                data-testid={`assign-cabin-${item.id}`}
+                title={
+                  !hasCabinBaggage
+                    ? 'Cabin baggage is not configured for this trip'
+                    : 'Assign to Cabin Bag'
+                }
+                className={`px-1.5 py-0.5 rounded-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                  item.bagAssignment === 'cabin'
+                    ? 'bg-forest-green text-warm-white shadow-2xs font-semibold'
+                    : 'text-ink-black/70 hover:text-ink-black hover:bg-sand/30'
+                }`}
+              >
+                Cabin
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onSetBagAssignment(item.id, item.bagAssignment === 'checked' ? undefined : 'checked')
+                }
+                disabled={!hasCheckedBaggage}
+                aria-pressed={item.bagAssignment === 'checked'}
+                data-testid={`assign-checked-${item.id}`}
+                title={
+                  !hasCheckedBaggage
+                    ? 'Checked baggage is not configured for this trip'
+                    : 'Assign to Checked Bag'
+                }
+                className={`px-1.5 py-0.5 rounded-xs font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                  item.bagAssignment === 'checked'
+                    ? 'bg-forest-green text-warm-white shadow-2xs font-semibold'
+                    : 'text-ink-black/70 hover:text-ink-black hover:bg-sand/30'
+                }`}
+              >
+                Checked
+              </button>
+              <button
+                type="button"
+                onClick={() => onSetBagAssignment(item.id, undefined)}
+                aria-pressed={!item.bagAssignment}
+                data-testid={`assign-unassigned-${item.id}`}
+                title="Keep Unassigned"
+                className={`px-1.5 py-0.5 rounded-xs font-medium transition-colors cursor-pointer ${
+                  !item.bagAssignment
+                    ? 'bg-sand/60 text-ink-black font-semibold shadow-2xs'
+                    : 'text-ink-black/50 hover:text-ink-black hover:bg-sand/30'
+                }`}
+              >
+                Unassigned
+              </button>
+            </div>
+
+            {/* Runtime Derived Physical Weight Display */}
+            <span
+              className="font-sans text-[11px] text-ink-black/60"
+              data-testid={`item-weight-${item.id}`}
+            >
+              {item.weightGrams !== undefined
+                ? formatWeightDisplay(deriveItemTotalWeightGrams(item))
+                : 'Unknown weight'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -528,6 +619,260 @@ function CriticalEssentialsBanner({
   )
 }
 
+interface LuggageWeightPanelProps {
+  weightEstimate: WeightEstimate
+  baggageConfig?: BaggageConfig
+}
+
+function LuggageWeightPanel({ weightEstimate }: LuggageWeightPanelProps) {
+  const { cabin, checked, unassigned, combined } = weightEstimate
+
+  return (
+    <Card
+      variant="scrapbook"
+      className="p-4 sm:p-5 space-y-4 border-sand/40 bg-warm-white shadow-sm"
+      data-testid="luggage-weight-panel"
+    >
+      {/* Panel Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-sand/40 pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-card bg-sand/25 text-terracotta flex items-center justify-center shrink-0">
+            <Luggage className="w-4.5 h-4.5" aria-hidden="true" />
+          </div>
+          <div>
+            <h3 className="font-serif font-bold text-base sm:text-lg text-ink-black flex items-center gap-2 flex-wrap">
+              <span>Luggage Weight & Bag Allocation</span>
+            </h3>
+            <p className="font-sans text-xs text-ink-black/70">
+              Independent baggage allowances evaluated separately for cabin and checked luggage.
+            </p>
+          </div>
+        </div>
+
+        {/* Combined Known Weight Stamp (Informational Only) */}
+        <div className="flex items-center gap-2 flex-wrap sm:justify-end" data-testid="combined-weight-summary">
+          <Badge variant="sand" size="sm">
+            {`Combined Gear: ${combined.totalKnownWeightKg} kg (${combined.totalKnownWeightLbs} lbs)`}
+          </Badge>
+          <span className="text-[11px] font-sans italic text-ink-black/55">
+            Informational only (No pooled limit)
+          </span>
+        </div>
+      </div>
+
+      {/* Dual Baggage Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        {/* CABIN BAGGAGE CARD */}
+        <div
+          data-testid="cabin-luggage-card"
+          className={`p-3.5 sm:p-4 rounded-card border space-y-2.5 ${
+            !cabin.isConfigured
+              ? 'bg-warm-cream/30 border-sand/40 opacity-80'
+              : cabin.isLimitExceeded
+              ? 'bg-terracotta/5 border-terracotta/40'
+              : 'bg-warm-cream/50 border-sand/50'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="font-serif font-bold text-sm sm:text-base text-ink-black">
+                Cabin Baggage
+              </span>
+              <Badge
+                variant={
+                  cabin.isConfigured
+                    ? cabin.isLimitExceeded
+                      ? 'terracotta'
+                      : 'forest'
+                    : 'outline'
+                }
+                size="sm"
+              >
+                {cabin.isConfigured ? `${cabin.percentageUsed}%` : 'Not Configured'}
+              </Badge>
+            </div>
+            {cabin.isConfigured && (
+              <span className="font-mono text-xs font-semibold text-ink-black" data-testid="cabin-weight-display">
+                {`${cabin.knownWeightKg} / ${cabin.limitKg} kg`}
+              </span>
+            )}
+          </div>
+
+          {cabin.isConfigured ? (
+            <>
+              {/* Progress Bar */}
+              <div
+                role="progressbar"
+                aria-valuenow={Math.min(100, cabin.percentageUsed)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Cabin baggage capacity used"
+                className="w-full bg-sand/30 rounded-full h-2 overflow-hidden"
+              >
+                <div
+                  className={`h-full transition-all duration-300 rounded-full ${
+                    cabin.isLimitExceeded ? 'bg-terracotta' : 'bg-forest-green'
+                  }`}
+                  style={{ width: `${Math.min(100, cabin.percentageUsed)}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs font-sans text-ink-black/70 flex-wrap gap-1">
+                <span>{`${cabin.itemsWithKnownWeightCount} item(s) allocated`}</span>
+                {cabin.isLimitExceeded ? (
+                  <span className="font-semibold text-terracotta flex items-center gap-1" data-testid="cabin-exceeded-warning">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>{`Exceeds limit by ${cabin.exceededAmountKg} kg!`}</span>
+                  </span>
+                ) : (
+                  <span className="text-forest-green font-medium" data-testid="cabin-remaining-capacity">
+                    {`${cabin.remainingCapacityKg} kg remaining`}
+                  </span>
+                )}
+              </div>
+
+              {cabin.hasUnknownWeights && (
+                <div className="text-[11px] font-sans text-terracotta/90 flex items-center gap-1 pt-0.5">
+                  <AlertCircle className="w-3 h-3 shrink-0" aria-hidden="true" />
+                  <span>{`${cabin.itemsWithUnknownWeightCount} cabin item(s) have unestimated weight`}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-xs font-sans text-ink-black/60 space-y-1">
+              <p>Cabin baggage is not configured for this trip.</p>
+              {cabin.itemsWithKnownWeightCount + cabin.itemsWithUnknownWeightCount > 0 && (
+                <p className="text-terracotta font-medium">
+                  {`Warning: ${cabin.itemsWithKnownWeightCount + cabin.itemsWithUnknownWeightCount} item(s) allocated to unconfigured cabin baggage.`}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* CHECKED BAGGAGE CARD */}
+        <div
+          data-testid="checked-luggage-card"
+          className={`p-3.5 sm:p-4 rounded-card border space-y-2.5 ${
+            !checked.isConfigured
+              ? 'bg-warm-cream/30 border-sand/40 opacity-80'
+              : checked.isLimitExceeded
+              ? 'bg-terracotta/5 border-terracotta/40'
+              : 'bg-warm-cream/50 border-sand/50'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="font-serif font-bold text-sm sm:text-base text-ink-black">
+                Checked Baggage
+              </span>
+              <Badge
+                variant={
+                  checked.isConfigured
+                    ? checked.isLimitExceeded
+                      ? 'terracotta'
+                      : 'forest'
+                    : 'outline'
+                }
+                size="sm"
+              >
+                {checked.isConfigured ? `${checked.percentageUsed}%` : 'Not Configured'}
+              </Badge>
+            </div>
+            {checked.isConfigured && (
+              <span className="font-mono text-xs font-semibold text-ink-black" data-testid="checked-weight-display">
+                {`${checked.knownWeightKg} / ${checked.limitKg} kg`}
+              </span>
+            )}
+          </div>
+
+          {checked.isConfigured ? (
+            <>
+              {/* Progress Bar */}
+              <div
+                role="progressbar"
+                aria-valuenow={Math.min(100, checked.percentageUsed)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Checked baggage capacity used"
+                className="w-full bg-sand/30 rounded-full h-2 overflow-hidden"
+              >
+                <div
+                  className={`h-full transition-all duration-300 rounded-full ${
+                    checked.isLimitExceeded ? 'bg-terracotta' : 'bg-forest-green'
+                  }`}
+                  style={{ width: `${Math.min(100, checked.percentageUsed)}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs font-sans text-ink-black/70 flex-wrap gap-1">
+                <span>{`${checked.itemsWithKnownWeightCount} item(s) allocated`}</span>
+                {checked.isLimitExceeded ? (
+                  <span className="font-semibold text-terracotta flex items-center gap-1" data-testid="checked-exceeded-warning">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>{`Exceeds limit by ${checked.exceededAmountKg} kg!`}</span>
+                  </span>
+                ) : (
+                  <span className="text-forest-green font-medium" data-testid="checked-remaining-capacity">
+                    {`${checked.remainingCapacityKg} kg remaining`}
+                  </span>
+                )}
+              </div>
+
+              {checked.hasUnknownWeights && (
+                <div className="text-[11px] font-sans text-terracotta/90 flex items-center gap-1 pt-0.5">
+                  <AlertCircle className="w-3 h-3 shrink-0" aria-hidden="true" />
+                  <span>{`${checked.itemsWithUnknownWeightCount} checked item(s) have unestimated weight`}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-xs font-sans text-ink-black/60 space-y-1">
+              <p>Checked baggage is not configured for this trip.</p>
+              {checked.itemsWithKnownWeightCount + checked.itemsWithUnknownWeightCount > 0 && (
+                <p className="text-terracotta font-medium">
+                  {`Warning: ${checked.itemsWithKnownWeightCount + checked.itemsWithUnknownWeightCount} item(s) allocated to unconfigured checked baggage.`}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Advisory Callouts (Unassigned & Unknown Weights) */}
+      <div className="space-y-2 pt-1">
+        {/* Unassigned Items Callout */}
+        {unassigned.totalItemCount > 0 && (
+          <div
+            data-testid="unassigned-items-warning"
+            className="p-2.5 rounded-sm bg-sunshine-yellow/15 border border-sunshine-yellow/40 flex items-center gap-2 text-xs font-sans text-ink-black"
+          >
+            <AlertCircle className="w-4 h-4 text-terracotta shrink-0" aria-hidden="true" />
+            <span className="flex-1">
+              <strong className="font-semibold">{`${unassigned.totalItemCount} item(s) unassigned`}</strong>
+              {` (${unassigned.knownWeightKg} kg known weight) — allocate to Cabin or Checked bag below.`}
+            </span>
+          </div>
+        )}
+
+        {/* Overall Unknown Weights Callout */}
+        {combined.hasUnknownWeights && (
+          <div
+            data-testid="unknown-weights-warning"
+            className="p-2.5 rounded-sm bg-warm-cream/60 border border-sand/50 flex items-center gap-2 text-xs font-sans text-ink-black/75"
+          >
+            <AlertCircle className="w-4 h-4 text-sand/80 shrink-0" aria-hidden="true" />
+            <span className="flex-1">
+              <strong className="font-semibold">{`${combined.totalItemsWithUnknownWeightCount} item(s) have unknown weight`}</strong>
+              <span> and are excluded from baggage weight calculations.</span>
+            </span>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 export function ChecklistPage() {
   const { id } = useParams<{ id: string }>()
 
@@ -547,6 +892,7 @@ export function ChecklistPage() {
   const [addPriority, setAddPriority] = useState<ItemPriority>('optional')
   const [addQuantity, setAddQuantity] = useState<number>(1)
   const [addWeight, setAddWeight] = useState<string>('')
+  const [addBagAssignment, setAddBagAssignment] = useState<BagAssignment | 'unassigned'>('unassigned')
   const [addNotes, setAddNotes] = useState<string>('')
   const [addError, setAddError] = useState<string | null>(null)
 
@@ -556,6 +902,7 @@ export function ChecklistPage() {
   const [editPriority, setEditPriority] = useState<ItemPriority>('optional')
   const [editQuantity, setEditQuantity] = useState<number>(1)
   const [editWeight, setEditWeight] = useState<string>('')
+  const [editBagAssignment, setEditBagAssignment] = useState<BagAssignment | 'unassigned'>('unassigned')
   const [editNotes, setEditNotes] = useState<string>('')
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -572,6 +919,7 @@ export function ChecklistPage() {
   const loadItems = useChecklistStore((state) => state.loadItems)
   const togglePacked = useChecklistStore((state) => state.togglePacked)
   const setPackedQuantity = useChecklistStore((state) => state.setPackedQuantity)
+  const setBagAssignment = useChecklistStore((state) => state.setBagAssignment)
   const addCustomItem = useChecklistStore((state) => state.addCustomItem)
   const updateItem = useChecklistStore((state) => state.updateItem)
   const deleteItem = useChecklistStore((state) => state.deleteItem)
@@ -655,6 +1003,11 @@ export function ChecklistPage() {
     return calculateReadinessScore(activeItems, dismissedRecords)
   }, [activeItems, dismissedRecords])
 
+  // Pure runtime luggage weight and dual-baggage capacity calculation (Slice 6.4C-C3)
+  const weightEstimate: WeightEstimate = useMemo(() => {
+    return calculateLuggageWeight(activeItems, currentTrip?.baggageConfig)
+  }, [activeItems, currentTrip?.baggageConfig])
+
   // Memoized categorization of critical items for the CriticalEssentialsBanner (Slice 6.4C-B)
   const unpackedCriticalItems = useMemo(() => {
     return activeItems.filter(
@@ -698,6 +1051,7 @@ export function ChecklistPage() {
     setAddPriority('optional')
     setAddQuantity(1)
     setAddWeight('')
+    setAddBagAssignment('unassigned')
     setAddNotes('')
     setAddError(null)
     setIsAddModalOpen(true)
@@ -729,6 +1083,7 @@ export function ChecklistPage() {
         priority: addPriority,
         quantity: addQuantity,
         weightGrams: parsedWeight,
+        bagAssignment: addBagAssignment === 'unassigned' ? undefined : addBagAssignment,
         notes: addNotes.trim() || undefined,
       })
       setIsAddModalOpen(false)
@@ -747,6 +1102,7 @@ export function ChecklistPage() {
     setEditPriority(item.priority)
     setEditQuantity(item.effectiveQuantity)
     setEditWeight(item.weightGrams !== undefined ? String(item.weightGrams) : '')
+    setEditBagAssignment(item.bagAssignment || 'unassigned')
     setEditNotes(item.notes || '')
     setEditError(null)
   }
@@ -779,6 +1135,7 @@ export function ChecklistPage() {
         priority: editPriority,
         quantity: editQuantity,
         weightGrams: parsedWeight,
+        bagAssignment: editBagAssignment === 'unassigned' ? undefined : editBagAssignment,
         notes: editNotes.trim() || undefined,
       })
       setEditingItem(null)
@@ -1058,6 +1415,25 @@ export function ChecklistPage() {
               </div>
             </div>
             <div className="space-y-1">
+              <label htmlFor="empty-add-item-bag" className="block text-xs font-semibold text-ink-black">
+                Bag Assignment
+              </label>
+              <select
+                id="empty-add-item-bag"
+                value={addBagAssignment}
+                onChange={(e) => setAddBagAssignment(e.target.value as BagAssignment | 'unassigned')}
+                className="w-full px-3 py-2 bg-warm-white border border-sand/60 rounded-card text-xs text-ink-black focus:outline-none focus:ring-2 focus:ring-terracotta"
+              >
+                <option value="unassigned">Unassigned</option>
+                <option value="cabin" disabled={!currentTrip?.baggageConfig?.hasCabinBaggage}>
+                  Cabin Baggage {currentTrip?.baggageConfig?.hasCabinBaggage ? '' : '(Not configured)'}
+                </option>
+                <option value="checked" disabled={!currentTrip?.baggageConfig?.hasCheckedBaggage}>
+                  Checked Baggage {currentTrip?.baggageConfig?.hasCheckedBaggage ? '' : '(Not configured)'}
+                </option>
+              </select>
+            </div>
+            <div className="space-y-1">
               <label htmlFor="empty-add-item-notes" className="block text-xs font-semibold text-ink-black">Notes</label>
               <textarea
                 id="empty-add-item-notes"
@@ -1324,6 +1700,12 @@ export function ChecklistPage() {
         isPackingItemId={packingItemId}
       />
 
+      {/* Luggage Weight & Dual Baggage Intelligence Panel (Slice 6.4C-C3) */}
+      <LuggageWeightPanel
+        weightEstimate={weightEstimate}
+        baggageConfig={currentTrip.baggageConfig}
+      />
+
       {/* Categorized Accordion Groups */}
       <div className="space-y-4 sm:space-y-5">
         {CATEGORIES.map((cat) => {
@@ -1414,8 +1796,11 @@ export function ChecklistPage() {
                     <ChecklistItemRow
                       key={item.id}
                       item={item}
+                      hasCabinBaggage={currentTrip.baggageConfig?.hasCabinBaggage}
+                      hasCheckedBaggage={currentTrip.baggageConfig?.hasCheckedBaggage}
                       onTogglePacked={togglePacked}
                       onSetPackedQuantity={setPackedQuantity}
+                      onSetBagAssignment={setBagAssignment}
                       onEdit={openEditModal}
                       onRemove={openRemoveModal}
                     />
@@ -1581,6 +1966,25 @@ export function ChecklistPage() {
             </div>
           </div>
           <div className="space-y-1">
+            <label htmlFor="add-item-bag" className="block text-xs font-semibold text-ink-black">
+              Bag Assignment
+            </label>
+            <select
+              id="add-item-bag"
+              value={addBagAssignment}
+              onChange={(e) => setAddBagAssignment(e.target.value as BagAssignment | 'unassigned')}
+              className="w-full px-3 py-2 bg-warm-white border border-sand/60 rounded-card text-xs text-ink-black focus:outline-none focus:ring-2 focus:ring-terracotta"
+            >
+              <option value="unassigned">Unassigned</option>
+              <option value="cabin" disabled={!currentTrip?.baggageConfig?.hasCabinBaggage}>
+                Cabin Baggage {currentTrip?.baggageConfig?.hasCabinBaggage ? '' : '(Not configured)'}
+              </option>
+              <option value="checked" disabled={!currentTrip?.baggageConfig?.hasCheckedBaggage}>
+                Checked Baggage {currentTrip?.baggageConfig?.hasCheckedBaggage ? '' : '(Not configured)'}
+              </option>
+            </select>
+          </div>
+          <div className="space-y-1">
             <label htmlFor="add-item-notes" className="block text-xs font-semibold text-ink-black">Notes</label>
             <textarea
               id="add-item-notes"
@@ -1694,6 +2098,25 @@ export function ChecklistPage() {
                 className="w-full px-3 py-2 bg-warm-white border border-sand/60 rounded-card text-xs text-ink-black focus:outline-none focus:ring-2 focus:ring-terracotta"
               />
             </div>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="edit-item-bag" className="block text-xs font-semibold text-ink-black">
+              Bag Assignment
+            </label>
+            <select
+              id="edit-item-bag"
+              value={editBagAssignment}
+              onChange={(e) => setEditBagAssignment(e.target.value as BagAssignment | 'unassigned')}
+              className="w-full px-3 py-2 bg-warm-white border border-sand/60 rounded-card text-xs text-ink-black focus:outline-none focus:ring-2 focus:ring-terracotta"
+            >
+              <option value="unassigned">Unassigned</option>
+              <option value="cabin" disabled={!currentTrip?.baggageConfig?.hasCabinBaggage}>
+                Cabin Baggage {currentTrip?.baggageConfig?.hasCabinBaggage ? '' : '(Not configured)'}
+              </option>
+              <option value="checked" disabled={!currentTrip?.baggageConfig?.hasCheckedBaggage}>
+                Checked Baggage {currentTrip?.baggageConfig?.hasCheckedBaggage ? '' : '(Not configured)'}
+              </option>
+            </select>
           </div>
           <div className="space-y-1">
             <label htmlFor="edit-item-notes" className="block text-xs font-semibold text-ink-black">Notes</label>

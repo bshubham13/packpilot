@@ -921,4 +921,196 @@ describe('Packing Checklist Foundation & Item Management (Slices 6.4A & 6.4B)', 
       expect(html).not.toContain('Ready for Adventure')
     })
   })
+
+  describe('11. Luggage Weight UI Integration (Slice 6.4C-C3)', () => {
+    beforeEach(async () => {
+      const storage = getStorageContext()
+      await storage.items.deleteItemsForTrip('trip-alpine-101')
+      await storage.trips.saveTripWithItems(mockTrip, mockItems)
+      await useTripStore.getState().selectTrip('trip-alpine-101')
+      await useChecklistStore.getState().loadItems('trip-alpine-101')
+    })
+
+    it('renders luggage weight panel with cabin and checked baggage cards and combined weight', () => {
+      const html = renderChecklist('trip-alpine-101')
+
+      expect(html).toContain('data-testid="luggage-weight-panel"')
+      expect(html).toContain('Luggage Weight &amp; Bag Allocation')
+      expect(html).toContain('data-testid="cabin-luggage-card"')
+      expect(html).toContain('data-testid="checked-luggage-card"')
+      expect(html).toContain('data-testid="combined-weight-summary"')
+      expect(html).toContain('Informational only (No pooled limit)')
+    })
+
+    it('displays unassigned items warning when items have no bag assignment', () => {
+      // In mockItems, items have no bagAssignment
+      const html = renderChecklist('trip-alpine-101')
+
+      expect(html).toContain('data-testid="unassigned-items-warning"')
+      expect(html).toContain('item(s) unassigned')
+      expect(html).toContain('allocate to Cabin or Checked bag below')
+    })
+
+    it('updates panel immediately when assigning items to cabin and checked baggage', async () => {
+      // Assign item-passport (2 * 50g = 100g = 0.1 kg) to cabin
+      await useChecklistStore.getState().setBagAssignment('item-passport', 'cabin')
+
+      // Assign item-thermal-top (4 * 200g = 800g = 0.8 kg) to checked
+      await useChecklistStore.getState().setBagAssignment('item-thermal-top', 'checked')
+
+      const html = renderChecklist('trip-alpine-101')
+
+      // Cabin weight display: 0.1 / 8 kg
+      expect(html).toContain('data-testid="cabin-weight-display"')
+      expect(html).toContain('0.1 / 8 kg')
+      expect(html).toContain('7.9 kg remaining')
+
+      // Checked weight display: 0.8 / 23 kg
+      expect(html).toContain('data-testid="checked-weight-display"')
+      expect(html).toContain('0.8 / 23 kg')
+      expect(html).toContain('22.2 kg remaining')
+
+      // Check item row bag buttons reflect state
+      expect(html).toContain('data-testid="assign-cabin-item-passport"')
+      expect(html).toContain('data-testid="assign-checked-item-thermal-top"')
+    })
+
+    it('shows independent capacity warnings when cabin limit is exceeded', async () => {
+      // Add a heavy item assigned to cabin (10 kg vs 8 kg limit)
+      await useChecklistStore.getState().addCustomItem({
+        name: 'Heavy Photography Kit',
+        category: 'electronics',
+        quantity: 1,
+        weightGrams: 10000, // 10.0 kg
+        bagAssignment: 'cabin',
+      })
+
+      const html = renderChecklist('trip-alpine-101')
+
+      // Cabin exceeded warning
+      expect(html).toContain('data-testid="cabin-exceeded-warning"')
+      expect(html).toContain('Exceeds limit by 2 kg!')
+
+      // Checked baggage remains normal (not exceeded)
+      expect(html).not.toContain('data-testid="checked-exceeded-warning"')
+      expect(html).toContain('23 kg remaining')
+    })
+
+    it('shows independent capacity warnings when checked limit is exceeded', async () => {
+      // Add a heavy checked item (25 kg vs 23 kg limit)
+      await useChecklistStore.getState().addCustomItem({
+        name: 'Expedition Tent Hardware',
+        category: 'gear',
+        quantity: 1,
+        weightGrams: 25000, // 25.0 kg
+        bagAssignment: 'checked',
+      })
+
+      const html = renderChecklist('trip-alpine-101')
+
+      // Checked exceeded warning
+      expect(html).toContain('data-testid="checked-exceeded-warning"')
+      expect(html).toContain('Exceeds limit by 2 kg!')
+
+      // Cabin baggage remains normal (not exceeded)
+      expect(html).not.toContain('data-testid="cabin-exceeded-warning"')
+    })
+
+    it('displays warning when items have unknown weight', async () => {
+      // Add custom item with unknown weight (undefined)
+      await useChecklistStore.getState().addCustomItem({
+        name: 'Local Souvenir Woodwork',
+        category: 'miscellaneous',
+        quantity: 2,
+        weightGrams: undefined,
+        bagAssignment: 'cabin',
+      })
+
+      const html = renderChecklist('trip-alpine-101')
+
+      expect(html).toContain('data-testid="unknown-weights-warning"')
+      expect(html).toContain('have unknown weight')
+      expect(html).toContain('excluded from baggage weight calculations')
+      expect(html).toContain('cabin item(s) have unestimated weight')
+    })
+
+    it('displays disabled baggage type as Not Configured without silently reassigning items', async () => {
+      // Trip where checked baggage is disabled
+      const tripWithoutChecked: Trip = {
+        ...mockTrip,
+        id: 'trip-cabin-only',
+        baggageConfig: {
+          hasCabinBaggage: true,
+          cabinWeightLimitKg: 7.0,
+          hasCheckedBaggage: false,
+          checkedWeightLimitKg: 23.0,
+        },
+      }
+      const storage = getStorageContext()
+      await storage.trips.saveTripWithItems(tripWithoutChecked, [
+        {
+          ...mockItems[0],
+          tripId: 'trip-cabin-only',
+          bagAssignment: 'checked', // Item assigned to checked, but checked is disabled!
+        },
+      ])
+      await useTripStore.getState().selectTrip('trip-cabin-only')
+      await useChecklistStore.getState().loadItems('trip-cabin-only')
+
+      const html = renderChecklist('trip-cabin-only')
+
+      expect(html).toContain('data-testid="checked-luggage-card"')
+      expect(html).toContain('Not Configured')
+      expect(html).toContain('Checked baggage is not configured for this trip')
+      expect(html).toContain('Warning: 1 item(s) allocated to unconfigured checked baggage')
+
+      // Confirm checked button on item row is disabled
+      expect(html).toContain('disabled=""')
+      expect(html).toContain('Checked baggage is not configured for this trip')
+    })
+
+    it('persists bag assignments across store reload', async () => {
+      await useChecklistStore.getState().setBagAssignment('item-passport', 'cabin')
+      await useChecklistStore.getState().setBagAssignment('item-thermal-top', 'checked')
+
+      // Simulate full page refresh / reload
+      useChecklistStore.setState({ items: [], tripId: null })
+      await useChecklistStore.getState().loadItems('trip-alpine-101')
+
+      const html = renderChecklist('trip-alpine-101')
+
+      expect(html).toContain('0.1 / 8 kg')
+      expect(html).toContain('0.8 / 23 kg')
+    })
+
+    it('supports bag assignment and explicit unassignment in add and edit modals', async () => {
+      // 1. Add item with bag assignment via store action (which modals call)
+      const newItem = await useChecklistStore.getState().addCustomItem({
+        name: 'Travel Journal',
+        category: 'miscellaneous',
+        quantity: 1,
+        weightGrams: 200,
+        bagAssignment: 'cabin',
+      })
+      expect(newItem.bagAssignment).toBe('cabin')
+
+      let html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('Travel Journal')
+
+      // 2. Edit item to change bag assignment to checked
+      const updatedItem = await useChecklistStore.getState().updateItem(newItem.id, {
+        bagAssignment: 'checked',
+      })
+      expect(updatedItem?.bagAssignment).toBe('checked')
+
+      // 3. Edit item to explicitly unassign
+      const unassignedItem = await useChecklistStore.getState().updateItem(newItem.id, {
+        bagAssignment: undefined,
+      })
+      expect(unassignedItem?.bagAssignment).toBeUndefined()
+
+      html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('data-testid="unassigned-items-warning"')
+    })
+  })
 })
