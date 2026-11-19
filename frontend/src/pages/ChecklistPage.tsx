@@ -311,6 +311,223 @@ function ChecklistItemRow({
   )
 }
 
+interface CriticalEssentialsBannerProps {
+  unpackedItems: PackingItem[]
+  partiallyPackedItems: PackingItem[]
+  dismissedRecords: DismissedItemRecord[]
+  onQuickPack: (item: PackingItem) => void
+  onRestoreDismissed: (itemSlug: string) => void
+  isRestoringSlug?: string | null
+  isPackingItemId?: string | null
+}
+
+function CriticalEssentialsBanner({
+  unpackedItems,
+  partiallyPackedItems,
+  dismissedRecords,
+  onQuickPack,
+  onRestoreDismissed,
+  isRestoringSlug,
+  isPackingItemId,
+}: CriticalEssentialsBannerProps) {
+  const totalOutstanding =
+    unpackedItems.length + partiallyPackedItems.length + dismissedRecords.length
+
+  if (totalOutstanding === 0) return null
+
+  return (
+    <Card
+      variant="scrapbook"
+      className="p-4 sm:p-5 border-l-4 border-l-terracotta border-terracotta/35 bg-warm-white space-y-4 shadow-sm"
+      data-testid="critical-essentials-banner"
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-sand/40 pb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-full bg-terracotta/15 text-terracotta flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-4 h-4" aria-hidden="true" />
+          </div>
+          <div>
+            <h3 className="font-serif font-bold text-base sm:text-lg text-ink-black flex items-center gap-2 flex-wrap">
+              <span>Critical Travel Essentials Requiring Action</span>
+              <Badge variant="terracotta" size="sm">
+                {`${totalOutstanding}`}
+              </Badge>
+            </h3>
+            <p className="font-sans text-xs text-ink-black/70">
+              Non-negotiable travel essentials that must be fully packed before departure.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {/* A. Not Packed Section */}
+        {unpackedItems.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-sans font-semibold text-ink-black uppercase tracking-wider">
+              <span className="w-2 h-2 rounded-full bg-terracotta"></span>
+              <span>{`Not Packed (${unpackedItems.length})`}</span>
+            </div>
+            <div className="space-y-2">
+              {unpackedItems.map((item) => (
+                <div
+                  key={item.id}
+                  data-testid={`critical-unpacked-${item.id}`}
+                  className="p-3 rounded-card bg-warm-cream/40 border border-sand/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs"
+                >
+                  <div className="space-y-0.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-sans text-sm font-semibold text-ink-black">
+                        {item.name}
+                      </span>
+                      <Badge variant="terracotta" size="sm">
+                        {`0 / ${item.effectiveQuantity} packed`}
+                      </Badge>
+                      <Badge variant="sand" size="sm">
+                        {item.category}
+                      </Badge>
+                    </div>
+                    {item.reasons && item.reasons.length > 0 && (
+                      <p className="font-sans text-xs text-ink-black/60 truncate">
+                        {item.reasons[0]}
+                      </p>
+                    )}
+                  </div>
+                  <div className="shrink-0">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      leftIcon={<Check className="w-3.5 h-3.5 text-forest-green" />}
+                      onClick={() => onQuickPack(item)}
+                      disabled={isPackingItemId === item.id}
+                      isLoading={isPackingItemId === item.id}
+                      aria-label={`Mark all ${item.effectiveQuantity} ${item.name} as packed`}
+                    >
+                      Mark All Packed
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* B. Partially Packed Section */}
+        {partiallyPackedItems.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-sans font-semibold text-ink-black uppercase tracking-wider">
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span>{`Partially Packed (${partiallyPackedItems.length})`}</span>
+            </div>
+            <div className="space-y-2">
+              {partiallyPackedItems.map((item) => {
+                const percent = Math.round((item.packedQuantity / item.effectiveQuantity) * 100)
+                const remaining = item.effectiveQuantity - item.packedQuantity
+                return (
+                  <div
+                    key={item.id}
+                    data-testid={`critical-partial-${item.id}`}
+                    className="p-3 rounded-card bg-sunshine-yellow/10 border border-sunshine-yellow/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs"
+                  >
+                    <div className="space-y-0.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-sans text-sm font-semibold text-ink-black">
+                          {item.name}
+                        </span>
+                        <Badge variant="sand" size="sm">
+                          {`${item.packedQuantity} of ${item.effectiveQuantity} packed (${percent}%)`}
+                        </Badge>
+                        <Badge variant="outline" size="sm">
+                          {`${remaining} remaining`}
+                        </Badge>
+                        <Badge variant="sand" size="sm">
+                          {item.category}
+                        </Badge>
+                      </div>
+                      {item.reasons && item.reasons.length > 0 && (
+                        <p className="font-sans text-xs text-ink-black/60 truncate">
+                          {item.reasons[0]}
+                        </p>
+                      )}
+                    </div>
+                    <div className="shrink-0">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        leftIcon={<Check className="w-3.5 h-3.5 text-forest-green" />}
+                        onClick={() => onQuickPack(item)}
+                        disabled={isPackingItemId === item.id}
+                        isLoading={isPackingItemId === item.id}
+                        aria-label={`Pack remaining ${remaining} ${item.name}`}
+                      >
+                        Pack Remaining
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* C. Dismissed Essentials Section */}
+        {dismissedRecords.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-sans font-semibold text-terracotta uppercase tracking-wider">
+              <span className="w-2 h-2 rounded-full bg-terracotta"></span>
+              <span>{`Dismissed Essentials (${dismissedRecords.length})`}</span>
+            </div>
+            <div className="space-y-2">
+              {dismissedRecords.map((record) => (
+                <div
+                  key={record.itemSlug}
+                  data-testid={`critical-dismissed-${record.itemSlug}`}
+                  className="p-3 rounded-card bg-red-50/60 border border-red-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs"
+                >
+                  <div className="space-y-0.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-sans text-sm font-semibold text-ink-black">
+                        {record.name}
+                      </span>
+                      <Badge variant="terracotta" size="sm">
+                        Dismissed Essential
+                      </Badge>
+                      <Badge variant="sand" size="sm">
+                        {record.category}
+                      </Badge>
+                    </div>
+                    {record.reasons && record.reasons.length > 0 && (
+                      <p className="font-sans text-xs text-ink-black/60 truncate">
+                        {record.reasons[0]}
+                      </p>
+                    )}
+                    <p className="font-sans text-[11px] text-ink-black/50">
+                      {`Dismissed ${formatDisplayDate(record.dismissedAt)}`}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+                      onClick={() => onRestoreDismissed(record.itemSlug)}
+                      disabled={isRestoringSlug === record.itemSlug}
+                      isLoading={isRestoringSlug === record.itemSlug}
+                      aria-label={`Restore essential ${record.name}`}
+                    >
+                      Restore Essential
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 export function ChecklistPage() {
   const { id } = useParams<{ id: string }>()
 
@@ -437,6 +654,40 @@ export function ChecklistPage() {
   const readinessScore: ReadinessScore = useMemo(() => {
     return calculateReadinessScore(activeItems, dismissedRecords)
   }, [activeItems, dismissedRecords])
+
+  // Memoized categorization of critical items for the CriticalEssentialsBanner (Slice 6.4C-B)
+  const unpackedCriticalItems = useMemo(() => {
+    return activeItems.filter(
+      (item) => item.priority === 'critical' && item.packedQuantity === 0 && item.effectiveQuantity > 0
+    )
+  }, [activeItems])
+
+  const partiallyPackedCriticalItems = useMemo(() => {
+    return activeItems.filter(
+      (item) =>
+        item.priority === 'critical' &&
+        item.packedQuantity > 0 &&
+        item.packedQuantity < item.effectiveQuantity
+    )
+  }, [activeItems])
+
+  const dismissedCriticalRecords = useMemo(() => {
+    return dismissedRecords.filter((d) => d.priority === 'critical')
+  }, [dismissedRecords])
+
+  const [packingItemId, setPackingItemId] = useState<string | null>(null)
+
+  const handleQuickPackItem = async (item: PackingItem) => {
+    if (packingItemId) return
+    setPackingItemId(item.id)
+    try {
+      await setPackedQuantity(item.id, item.effectiveQuantity)
+    } catch (err: unknown) {
+      setPageError(err instanceof Error ? err.message : 'Failed to pack item.')
+    } finally {
+      setPackingItemId(null)
+    }
+  }
 
   const isLoading = isTripStoreLoading || isChecklistLoading
 
@@ -1061,6 +1312,17 @@ export function ChecklistPage() {
           </div>
         </div>
       </Card>
+
+      {/* Critical Missing Essentials Banner (Slice 6.4C-B) */}
+      <CriticalEssentialsBanner
+        unpackedItems={unpackedCriticalItems}
+        partiallyPackedItems={partiallyPackedCriticalItems}
+        dismissedRecords={dismissedCriticalRecords}
+        onQuickPack={handleQuickPackItem}
+        onRestoreDismissed={handleRestoreDismissed}
+        isRestoringSlug={restoringSlug}
+        isPackingItemId={packingItemId}
+      />
 
       {/* Categorized Accordion Groups */}
       <div className="space-y-4 sm:space-y-5">

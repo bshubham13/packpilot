@@ -793,4 +793,132 @@ describe('Packing Checklist Foundation & Item Management (Slices 6.4A & 6.4B)', 
       expect(html).toContain('1 critical travel essential remaining')
     })
   })
+
+  describe('10. Critical Missing Essentials Banner (Slice 6.4C-B)', () => {
+    beforeEach(async () => {
+      const storage = getStorageContext()
+      await storage.items.deleteItemsForTrip('trip-alpine-101')
+      await storage.trips.saveTripWithItems(mockTrip, mockItems)
+      await useTripStore.getState().selectTrip('trip-alpine-101')
+      await useChecklistStore.getState().loadItems('trip-alpine-101')
+    })
+
+    it('renders completely unpacked critical item in Not Packed section with Mark All Packed button', async () => {
+      // Unpack passport completely
+      await useChecklistStore.getState().setPackedQuantity('item-passport', 0)
+
+      const html = renderChecklist('trip-alpine-101')
+
+      // Banner should be visible
+      expect(html).toContain('Critical Travel Essentials Requiring Action')
+      expect(html).toContain('Not Packed (1)')
+      expect(html).toContain('Passport &amp; Travel Visa')
+      expect(html).toContain('0 / 2 packed')
+      expect(html).toContain('Mark All Packed')
+      expect(html).toContain('aria-label="Mark all 2 Passport &amp; Travel Visa as packed"')
+    })
+
+    it('renders partially packed critical item in Partially Packed section with Pack Remaining button', () => {
+      // In mockItems, item-thermal-top is 2 of 4 (partially packed)
+      const html = renderChecklist('trip-alpine-101')
+
+      expect(html).toContain('Critical Travel Essentials Requiring Action')
+      expect(html).toContain('Partially Packed (1)')
+      expect(html).toContain('Thermal Base Layer Top')
+      expect(html).toContain('2 of 4 packed (50%)')
+      expect(html).toContain('2 remaining')
+      expect(html).toContain('Pack Remaining')
+      expect(html).toContain('aria-label="Pack remaining 2 Thermal Base Layer Top"')
+    })
+
+    it('renders multiple critical items across different states simultaneously', async () => {
+      // 1. Passport: unpack completely (Not Packed)
+      await useChecklistStore.getState().setPackedQuantity('item-passport', 0)
+      // 2. Thermal top: partially packed (2 of 4, already partial)
+      // 3. Add and dismiss a critical item
+      const customCritical = await useChecklistStore.getState().addCustomItem({
+        name: 'Prescription Inhaler',
+        category: 'health',
+        priority: 'critical',
+        quantity: 1,
+      })
+      await useChecklistStore.getState().dismissItem(customCritical.id)
+
+      const html = renderChecklist('trip-alpine-101')
+
+      expect(html).toContain('Critical Travel Essentials Requiring Action')
+      // Total count badge should show 3
+      expect(html).toContain('Not Packed (1)')
+      expect(html).toContain('Partially Packed (1)')
+      expect(html).toContain('Dismissed Essentials (1)')
+      expect(html).toContain('Prescription Inhaler')
+      expect(html).toContain('Restore Essential')
+    })
+
+    it('renders dismissed critical item in Dismissed Essentials section and allows restoration', async () => {
+      // Pack thermal top so it's not partial
+      await useChecklistStore.getState().setPackedQuantity('item-thermal-top', 4)
+
+      // Dismiss passport
+      await useChecklistStore.getState().dismissItem('item-passport')
+
+      let html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('Critical Travel Essentials Requiring Action')
+      expect(html).toContain('Dismissed Essentials (1)')
+      expect(html).toContain('Passport &amp; Travel Visa')
+      expect(html).toContain('Dismissed Essential')
+      expect(html).toContain('Restore Essential')
+
+      // Restore passport
+      await useChecklistStore.getState().restoreDismissedItem('doc-passport')
+
+      // After restoration, passport is back in active list and not dismissed
+      html = renderChecklist('trip-alpine-101')
+      expect(html).not.toContain('Dismissed Essentials (1)')
+    })
+
+    it('quick-pack action marks critical item fully packed and updates readiness state', async () => {
+      let html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('Partially Packed (1)')
+      expect(html).toContain('50%')
+
+      // Perform quick-pack action on thermal top (set to effectiveQuantity = 4)
+      await useChecklistStore.getState().setPackedQuantity('item-thermal-top', 4)
+
+      html = renderChecklist('trip-alpine-101')
+      // Thermal top is now fully packed, so no critical items remain incomplete
+      expect(html).not.toContain('Critical Travel Essentials Requiring Action')
+      expect(html).toContain('67%')
+    })
+
+    it('banner disappears completely when all critical items are packed and none are dismissed', async () => {
+      // Pack thermal top fully
+      await useChecklistStore.getState().setPackedQuantity('item-thermal-top', 4)
+
+      const html = renderChecklist('trip-alpine-101')
+      // All critical items (passport & thermal top) are fully packed; 0 dismissed
+      expect(html).not.toContain('Critical Travel Essentials Requiring Action')
+      expect(html).not.toContain('data-testid="critical-essentials-banner"')
+    })
+
+    it('banner remains visible if a critical item is dismissed even when all active items are packed', async () => {
+      // Pack all active items fully
+      await useChecklistStore.getState().setPackedQuantity('item-thermal-top', 4)
+      await useChecklistStore.getState().setPackedQuantity('item-hiking-boots', 2)
+      await useChecklistStore.getState().setPackedQuantity('item-first-aid', 1)
+
+      // Dismiss critical passport
+      await useChecklistStore.getState().dismissItem('item-passport')
+
+      const html = renderChecklist('trip-alpine-101')
+
+      // All remaining active items are 100% packed, BUT critical item is dismissed!
+      expect(html).toContain('100%')
+      expect(html).toContain('Critical Travel Essentials Requiring Action')
+      expect(html).toContain('Dismissed Essentials (1)')
+      expect(html).toContain('Passport &amp; Travel Visa')
+      expect(html).toContain('Restore Essential')
+      expect(html).not.toContain('Ready for Adventure')
+    })
+  })
 })
