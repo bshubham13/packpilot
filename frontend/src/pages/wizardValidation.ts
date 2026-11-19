@@ -8,18 +8,25 @@ import type {
   BaggageConfig,
   TripActivity,
   ClimateType,
+  ResolvedLocation,
 } from '../types'
 
 export interface WizardBasicsData {
   name: string
+  origin?: string
   destination: string
+  originLocation?: ResolvedLocation
+  destinationLocation?: ResolvedLocation
   startDate: string
   endDate: string
 }
 
 export const INITIAL_BASICS: WizardBasicsData = {
   name: '',
+  origin: '',
   destination: '',
+  originLocation: undefined,
+  destinationLocation: undefined,
   startDate: '',
   endDate: '',
 }
@@ -105,12 +112,46 @@ export const WIZARD_STEPS = [
 
 export function isStep1Valid(basics: WizardBasicsData): boolean {
   const trimmedName = basics.name.trim()
+  const trimmedOrigin = (basics.origin ?? '').trim()
   const trimmedDest = basics.destination.trim()
   if (!trimmedName || trimmedName.length > 80) return false
+  if (!trimmedOrigin) return false
   if (!trimmedDest) return false
   if (!basics.startDate || !basics.endDate) return false
   const validation = validateDateRange(basics.startDate, basics.endDate)
   return validation.isValid
+}
+
+/**
+ * Determines whether origin and destination refer to the same city / locality.
+ * Used to render an informational staycation/local-journey notice without blocking validation.
+ */
+export function isSameCityJourney(
+  origin?: string,
+  destination?: string,
+  originLocation?: ResolvedLocation,
+  destinationLocation?: ResolvedLocation
+): boolean {
+  const normOrigin = (origin || '').trim().toLowerCase()
+  const normDest = (destination || '').trim().toLowerCase()
+  if (!normOrigin || !normDest) return false
+  if (normOrigin === normDest) return true
+  if (
+    originLocation?.city?.id &&
+    destinationLocation?.city?.id &&
+    originLocation.city.id === destinationLocation.city.id
+  ) {
+    return true
+  }
+  if (
+    originLocation?.city?.name &&
+    destinationLocation?.city?.name &&
+    originLocation.city.name.trim().toLowerCase() === destinationLocation.city.name.trim().toLowerCase() &&
+    originLocation.city.countryCode === destinationLocation.city.countryCode
+  ) {
+    return true
+  }
+  return false
 }
 
 export function isStep2Valid(travellers: TravellerComposition): boolean {
@@ -183,6 +224,9 @@ export function compileTripConfig(
   return {
     name: basics.name.trim(),
     destination: basics.destination.trim(),
+    origin: basics.origin?.trim() || undefined,
+    originLocation: basics.originLocation,
+    destinationLocation: basics.destinationLocation,
     startDate: basics.startDate,
     endDate: basics.endDate,
     transportModes: details.transportModes,
@@ -221,6 +265,21 @@ export function isValidWizardDraft(obj: unknown): obj is CompleteWizardDraft {
   }
   if (!draft.basics || typeof draft.basics !== 'object') return false
   if (typeof draft.basics.name !== 'string' || typeof draft.basics.destination !== 'string') {
+    return false
+  }
+  if (draft.basics.origin !== undefined && typeof draft.basics.origin !== 'string') {
+    return false
+  }
+  if (
+    draft.basics.originLocation !== undefined &&
+    (typeof draft.basics.originLocation !== 'object' || draft.basics.originLocation === null)
+  ) {
+    return false
+  }
+  if (
+    draft.basics.destinationLocation !== undefined &&
+    (typeof draft.basics.destinationLocation !== 'object' || draft.basics.destinationLocation === null)
+  ) {
     return false
   }
   if (!draft.travellers || typeof draft.travellers !== 'object') return false
