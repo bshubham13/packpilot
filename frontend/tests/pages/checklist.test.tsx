@@ -655,4 +655,142 @@ describe('Packing Checklist Foundation & Item Management (Slices 6.4A & 6.4B)', 
       expect(html).not.toContain('Waterproof Hiking Boots')
     })
   })
+
+  describe('9. Readiness Scoring & Category Progress (Slice 6.4C-A)', () => {
+    beforeEach(async () => {
+      const storage = getStorageContext()
+      await storage.items.deleteItemsForTrip('trip-alpine-101')
+      await storage.trips.saveTripWithItems(mockTrip, mockItems)
+      await useTripStore.getState().selectTrip('trip-alpine-101')
+      await useChecklistStore.getState().loadItems('trip-alpine-101')
+    })
+
+    it('renders overall readiness widget with weighted score, points ratio, and progress gauge', () => {
+      const html = renderChecklist('trip-alpine-101')
+
+      // Weighted readiness:
+      // Passport (critical): 3 pts (2/2)
+      // Thermal top (critical): 1.5 pts (2/4 partial)
+      // Hiking boots (recommended): 0 pts (0/2)
+      // First aid kit (optional): 0 pts (0/1)
+      // Total: 4.5 / 9 points = 50%
+      expect(html).toContain('Packing Readiness')
+      expect(html).toContain('50%')
+      expect(html).toContain('4.5 / 9 points')
+      expect(html).toContain('1 of 4 items fully packed')
+      expect(html).toContain('Needs Attention')
+      expect(html).toContain('1 critical travel essential remaining')
+      expect(html).toContain('Overall packing readiness score')
+    })
+
+    it('supports partial packing with proportional points in overall readiness', async () => {
+      // Initially thermal top is 2 of 4 (1.5 pts) -> 50%
+      let html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('4.5 / 9 points')
+      expect(html).toContain('50%')
+
+      // Set thermal top to 4 of 4 (fully packed -> 3 pts)
+      await useChecklistStore.getState().setPackedQuantity('item-thermal-top', 4)
+
+      // Total packed points: 3 + 3 = 6 / 9 points = 67%
+      html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('6 / 9 points')
+      expect(html).toContain('67%')
+      // Critical item is fully packed, so no outstanding critical remaining
+      expect(html).not.toContain('critical travel essential remaining')
+      expect(html).toContain('In Progress')
+    })
+
+    it('renders category-wise readiness percentages and progress bars', () => {
+      const html = renderChecklist('trip-alpine-101')
+
+      // Documents category: Passport fully packed -> 100%
+      expect(html).toContain('100% • 1 / 1 packed')
+      expect(html).toContain('Complete')
+
+      // Clothing category: Thermal top 2 of 4 packed -> 50%
+      expect(html).toContain('50% • 0 / 1 packed')
+
+      // Gear category: Hiking boots unpacked -> 0%
+      expect(html).toContain('0% • 0 / 1 packed')
+
+      // Health category: First aid kit unpacked -> 0%
+      expect(html).toContain('Health &amp; Safety')
+    })
+
+    it('displays 0% readiness on an empty checklist', async () => {
+      const emptyTrip: Trip = {
+        ...mockTrip,
+        id: 'trip-empty-readiness',
+        name: 'Empty Readiness Journey',
+      }
+      const storage = getStorageContext()
+      await storage.trips.saveTripWithItems(emptyTrip, [])
+      await useTripStore.getState().selectTrip('trip-empty-readiness')
+      await useChecklistStore.getState().loadItems('trip-empty-readiness')
+
+      const html = renderChecklist('trip-empty-readiness')
+      expect(html).toContain('Packing Checklist is Empty')
+      expect(html).toContain('0% Readiness')
+      expect(html).toContain('0 / 0 points')
+    })
+
+    it('excludes dismissed optional items from denominator without score penalty', async () => {
+      // Dismiss optional first aid kit (1 point)
+      await useChecklistStore.getState().dismissItem('item-first-aid')
+
+      // Pack passport (3 pts), thermal top (3 pts), hiking boots (2 pts)
+      await useChecklistStore.getState().setPackedQuantity('item-thermal-top', 4)
+      await useChecklistStore.getState().setPackedQuantity('item-hiking-boots', 2)
+
+      // Denominator should now be 3 + 3 + 2 = 8 points (optional item excluded)
+      // Total packed points = 8 / 8 = 100%
+      const html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('8 / 8 points')
+      expect(html).toContain('100%')
+      expect(html).toContain('Ready for Adventure')
+    })
+
+    it('prevents Ready for Adventure status when a critical essential is dismissed', async () => {
+      // Pack passport (3 pts), hiking boots (2 pts), first aid (1 pt)
+      await useChecklistStore.getState().setPackedQuantity('item-hiking-boots', 2)
+      await useChecklistStore.getState().setPackedQuantity('item-first-aid', 1)
+
+      // Dismiss critical thermal top
+      await useChecklistStore.getState().dismissItem('item-thermal-top')
+
+      // Active items total: 3 + 2 + 1 = 6 points, all packed -> 100%
+      const html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('100%')
+      expect(html).toContain('6 / 6 points')
+      // Crucial safety check: MUST NOT say Ready for Adventure!
+      expect(html).not.toContain('Ready for Adventure')
+      expect(html).toContain('Needs Attention')
+      expect(html).toContain('1 critical travel essential dismissed')
+    })
+
+    it('reactively updates readiness score after packing, editing, dismissal and restoration', async () => {
+      // 1. Initial: 4.5 / 9 points = 50%
+      let html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('50%')
+
+      // 2. Pack boots (2 pts) -> 6.5 / 9 points = 72%
+      await useChecklistStore.getState().setPackedQuantity('item-hiking-boots', 2)
+      html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('6.5 / 9 points')
+      expect(html).toContain('72%')
+
+      // 3. Dismiss critical thermal top
+      await useChecklistStore.getState().dismissItem('item-thermal-top')
+      html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('1 critical travel essential dismissed')
+
+      // 4. Restore dismissed thermal top
+      await useChecklistStore.getState().restoreDismissedItem('wear-thermal-top')
+      html = renderChecklist('trip-alpine-101')
+      expect(html).toContain('Thermal Base Layer Top')
+      expect(html).not.toContain('1 critical travel essential dismissed')
+      expect(html).toContain('1 critical travel essential remaining')
+    })
+  })
 })

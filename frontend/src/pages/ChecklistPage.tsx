@@ -30,7 +30,15 @@ import { useTripStore } from '../stores/tripStore'
 import { useChecklistStore } from '../stores/checklistStore'
 import { Card, Button, Badge, Modal } from '../components/ui'
 import { formatDisplayDate } from '../utils/dates'
-import type { PackingCategory, PackingItem, ItemPriority, Trip, DismissedItemRecord } from '../types'
+import { calculateReadinessScore } from '../utils/scoring'
+import type {
+  PackingCategory,
+  PackingItem,
+  ItemPriority,
+  Trip,
+  DismissedItemRecord,
+  ReadinessScore,
+} from '../types'
 
 interface CategoryMeta {
   key: PackingCategory
@@ -425,6 +433,11 @@ export function ChecklistPage() {
   const totalProgressPercentage =
     totalItemsCount > 0 ? Math.round((totalPackedCount / totalItemsCount) * 100) : 0
 
+  // Pure 3/2/1 weighted readiness score calculation with partial packing and safety guardrails
+  const readinessScore: ReadinessScore = useMemo(() => {
+    return calculateReadinessScore(activeItems, dismissedRecords)
+  }, [activeItems, dismissedRecords])
+
   const isLoading = isTripStoreLoading || isChecklistLoading
 
   // Handlers for Add Custom Item Modal
@@ -681,6 +694,13 @@ export function ChecklistPage() {
             <h2 className="font-serif font-bold text-xl text-ink-black">
               Packing Checklist is Empty
             </h2>
+            <div className="pt-1">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sand/20 text-xs font-sans text-ink-black/75">
+                <span className="font-semibold text-ink-black">0% Readiness</span>
+                <span className="text-sand/80">•</span>
+                <span>0 / 0 points</span>
+              </span>
+            </div>
             <p className="font-sans text-xs sm:text-sm text-ink-black/70 leading-relaxed">
               There are currently no packing items recorded for this trip.
             </p>
@@ -902,6 +922,146 @@ export function ChecklistPage() {
         </div>
       </div>
 
+      {/* Overall Readiness Summary Widget */}
+      <Card variant="polaroid" hasTape className="p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
+          {/* Left: Circular Progress Gauge & Score Details */}
+          <div className="flex items-center gap-4 sm:gap-5 w-full sm:w-auto">
+            {/* Circular Progress Gauge */}
+            <div className="relative w-18 h-18 sm:w-20 sm:h-20 flex items-center justify-center shrink-0">
+              <svg
+                className="w-full h-full transform -rotate-90"
+                viewBox="0 0 36 36"
+                aria-hidden="true"
+              >
+                <path
+                  className="text-sand/30"
+                  strokeWidth="3.2"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+                <path
+                  className={
+                    readinessScore.isFullyReady
+                      ? 'text-forest-green transition-all duration-500'
+                      : 'text-terracotta transition-all duration-500'
+                  }
+                  strokeDasharray={`${readinessScore.percentage}, 100`}
+                  strokeWidth="3.2"
+                  strokeLinecap="round"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                <span className="font-serif font-bold text-lg sm:text-xl text-ink-black leading-none">
+                  {`${readinessScore.percentage}%`}
+                </span>
+                <span className="text-[10px] font-sans font-medium text-ink-black/60 leading-none mt-0.5">
+                  Ready
+                </span>
+              </div>
+            </div>
+
+            {/* Main Readiness Details */}
+            <div className="space-y-1.5 min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="font-serif font-bold text-lg sm:text-xl text-ink-black tracking-tight">
+                  Packing Readiness
+                </h2>
+                <Badge
+                  variant={
+                    readinessScore.isFullyReady
+                      ? 'forest'
+                      : readinessScore.hasOutstandingCritical
+                      ? 'terracotta'
+                      : 'sand'
+                  }
+                  size="sm"
+                  icon={
+                    readinessScore.isFullyReady ? (
+                      <Check className="w-3 h-3 stroke-[2.5]" aria-hidden="true" />
+                    ) : undefined
+                  }
+                >
+                  {readinessScore.isFullyReady
+                    ? 'Ready for Adventure'
+                    : readinessScore.hasOutstandingCritical
+                    ? 'Needs Attention'
+                    : readinessScore.percentage === 0
+                    ? 'Packing Not Started'
+                    : 'In Progress'}
+                </Badge>
+              </div>
+
+              {/* Packed Points / Total Possible Points */}
+              <p className="font-sans text-xs sm:text-sm text-ink-black/75 flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-ink-black">
+                  {`${readinessScore.packedPoints} / ${readinessScore.totalPossiblePoints} points`}
+                </span>
+                <span className="text-sand/80">•</span>
+                <span>{`${totalPackedCount} of ${totalItemsCount} items fully packed`}</span>
+              </p>
+
+              {/* Separate indication when critical essentials remain outstanding */}
+              {readinessScore.hasOutstandingCritical && (
+                <div className="flex items-center gap-1.5 text-xs font-sans text-terracotta font-medium pt-0.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    {readinessScore.unpackedCriticalCount > 0 && readinessScore.dismissedCriticalCount > 0
+                      ? `${readinessScore.unpackedCriticalCount} critical essential${
+                          readinessScore.unpackedCriticalCount > 1 ? 's' : ''
+                        } unpacked, ${readinessScore.dismissedCriticalCount} dismissed`
+                      : readinessScore.unpackedCriticalCount > 0
+                      ? `${readinessScore.unpackedCriticalCount} critical travel essential${
+                          readinessScore.unpackedCriticalCount > 1 ? 's' : ''
+                        } remaining`
+                      : `${readinessScore.dismissedCriticalCount} critical travel essential${
+                          readinessScore.dismissedCriticalCount > 1 ? 's' : ''
+                        } dismissed`}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right: Linear Progress Bar & Weight/Status Summary */}
+          <div className="w-full sm:w-52 space-y-2 pt-2 sm:pt-0 sm:border-l sm:border-sand/40 sm:pl-5">
+            <div className="flex items-center justify-between text-xs font-sans text-ink-black/75">
+              <span className="font-medium">Readiness Score</span>
+              <span className="font-bold text-ink-black">{`${readinessScore.percentage}%`}</span>
+            </div>
+            <div
+              role="progressbar"
+              aria-valuenow={readinessScore.percentage}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Overall packing readiness score"
+              className="w-full bg-sand/30 rounded-full h-2.5 overflow-hidden"
+            >
+              <div
+                className={`h-full transition-all duration-300 rounded-full ${
+                  readinessScore.isFullyReady ? 'bg-forest-green' : 'bg-terracotta'
+                }`}
+                style={{ width: `${readinessScore.percentage}%` }}
+              />
+            </div>
+            <div className="text-[11px] font-sans text-ink-black/60 flex items-center justify-between">
+              <span>
+                {readinessScore.isFullyReady
+                  ? 'Fully packed & verified!'
+                  : `${Math.round((readinessScore.totalPossiblePoints - readinessScore.packedPoints) * 10) / 10} pts remaining`}
+              </span>
+              <span className="font-serif italic text-ink-black/50">
+                {readinessScore.isFullyReady ? 'Ready to travel' : '3 / 2 / 1 weighted'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       {/* Categorized Accordion Groups */}
       <div className="space-y-4 sm:space-y-5">
         {CATEGORIES.map((cat) => {
@@ -911,7 +1071,8 @@ export function ChecklistPage() {
           const isCollapsed = Boolean(collapsedCategories[cat.key])
           const catPackedCount = catItems.filter((i) => i.isPacked).length
           const catTotalCount = catItems.length
-          const isCategoryComplete = catPackedCount === catTotalCount && catTotalCount > 0
+          const catScore = calculateReadinessScore(catItems, [])
+          const isCategoryComplete = catScore.percentage === 100 && catTotalCount > 0
 
           const IconComponent = cat.icon
 
@@ -952,7 +1113,7 @@ export function ChecklistPage() {
 
                 <div className="flex items-center gap-2 shrink-0">
                   <Badge variant={isCategoryComplete ? 'forest' : 'sand'} size="sm">
-                    {`${catPackedCount} / ${catTotalCount} packed`}
+                    {`${catScore.percentage}% • ${catPackedCount} / ${catTotalCount} packed`}
                   </Badge>
                   <div className="text-ink-black/50">
                     {isCollapsed ? (
@@ -963,6 +1124,23 @@ export function ChecklistPage() {
                   </div>
                 </div>
               </button>
+
+              {/* Category Progress Bar */}
+              <div
+                role="progressbar"
+                aria-valuenow={catScore.percentage}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`${cat.label} readiness`}
+                className="w-full bg-sand/25 rounded-full h-1 overflow-hidden"
+              >
+                <div
+                  className={`h-full transition-all duration-300 rounded-full ${
+                    isCategoryComplete ? 'bg-forest-green' : 'bg-terracotta'
+                  }`}
+                  style={{ width: `${catScore.percentage}%` }}
+                />
+              </div>
 
               {/* Category Items List */}
               {!isCollapsed && (
