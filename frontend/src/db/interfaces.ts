@@ -36,12 +36,26 @@ export interface ITemplatesRepository {
   deleteTemplate(id: string): Promise<void>
 }
 
+export interface CacheRecord<T = unknown> {
+  key: string
+  data: T
+  expiresAt: number // Unix epoch timestamp (ms)
+}
+
+export interface ICacheRepository {
+  get<T>(key: string): Promise<T | null>
+  set<T>(key: string, data: T, ttlMs: number): Promise<void>
+  delete(key: string): Promise<void>
+  clear(): Promise<void>
+}
+
 export type StorageType = 'indexeddb' | 'memory'
 
 export interface StorageContext {
   trips: ITripsRepository
   items: IItemsRepository
   templates: ITemplatesRepository
+  cache: ICacheRepository
   isStorageAvailable: boolean
   storageType: StorageType
 }

@@ -9,9 +9,11 @@ import { PackPilotDatabase, getDexieDatabase, closeAndResetDexieDatabase } from 
 import { DexieTripsRepository } from './dexie/tripsRepository'
 import { DexieItemsRepository } from './dexie/itemsRepository'
 import { DexieTemplatesRepository } from './dexie/templatesRepository'
+import { DexieCacheRepository } from './dexie/cacheRepository'
 import { MemoryTripsRepository } from './memory/memoryTripsRepository'
 import { MemoryItemsRepository } from './memory/memoryItemsRepository'
 import { MemoryTemplatesRepository } from './memory/memoryTemplatesRepository'
+import { MemoryCacheRepository } from './memory/memoryCacheRepository'
 
 let currentContext: StorageContext | null = null
 let activeCreationPromise: Promise<StorageContext> | null = null
@@ -54,6 +56,7 @@ export async function createStorageContext(
           trips: new DexieTripsRepository(db),
           items: new DexieItemsRepository(db),
           templates: new DexieTemplatesRepository(db),
+          cache: new DexieCacheRepository(db),
           isStorageAvailable: true,
           storageType: 'indexeddb',
         }
@@ -72,6 +75,7 @@ export async function createStorageContext(
       trips: new MemoryTripsRepository(),
       items: new MemoryItemsRepository(),
       templates: new MemoryTemplatesRepository(),
+      cache: new MemoryCacheRepository(),
       isStorageAvailable: false,
       storageType: 'memory',
     }
@@ -100,6 +104,7 @@ export function getStorageContext(): StorageContext {
         trips: new MemoryTripsRepository(),
         items: new MemoryItemsRepository(),
         templates: new MemoryTemplatesRepository(),
+        cache: new MemoryCacheRepository(),
         isStorageAvailable: false,
         storageType: 'memory',
       }

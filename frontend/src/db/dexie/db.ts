@@ -5,11 +5,14 @@
 
 import Dexie, { type Table } from 'dexie'
 import type { Trip, PackingItem, PackingTemplate } from '../../types'
+import type { CacheRecord } from '../interfaces'
 
 export class PackPilotDatabase extends Dexie {
   trips!: Table<Trip, string>
   items!: Table<PackingItem, string>
   templates!: Table<PackingTemplate, string>
+  geo_cache!: Table<CacheRecord, string>
+  weather_cache!: Table<CacheRecord, string>
 
   constructor(dbName = 'PackPilotDB') {
     super(dbName)
@@ -19,6 +22,15 @@ export class PackPilotDatabase extends Dexie {
       trips: 'id, destination, startDate, endDate, createdAt',
       items: 'id, tripId, category, priority, isPacked, [tripId+category], itemSlug',
       templates: 'id, isSystem, createdAt',
+    })
+
+    // Schema Version 2: Additive local cache tables (preserves all Version 1 tables and indexes)
+    this.version(2).stores({
+      trips: 'id, destination, startDate, endDate, createdAt',
+      items: 'id, tripId, category, priority, isPacked, [tripId+category], itemSlug',
+      templates: 'id, isSystem, createdAt',
+      geo_cache: 'key, expiresAt',
+      weather_cache: 'key, expiresAt',
     })
   }
 }

@@ -3,6 +3,15 @@
  * Specification Version: 1.4.0
  */
 
+import type {
+  ResolvedLocation,
+  OvernightSelection,
+  DestinationMobility,
+  NormalizedTripContext,
+} from './context'
+
+export * from './context'
+
 export type TransportMode =
   | 'flight'
   | 'train'
@@ -154,6 +163,12 @@ export interface DismissedItemRecord {
 export interface TripConfig {
   name: string
   destination: string
+  origin?: string                    // Optional origin city string
+  originLocation?: ResolvedLocation  // Structured resolved location
+  destinationLocation?: ResolvedLocation
+  overnightSelection?: OvernightSelection
+  primaryTransport?: TransportMode
+  destinationMobility?: DestinationMobility
   startDate: string                  // ISO 8601 YYYY-MM-DD
   endDate: string                    // ISO 8601 YYYY-MM-DD
   transportModes: TransportMode[]
@@ -177,6 +192,7 @@ export interface Trip extends TripConfig {
   personalPreferences: string[]
   baggageConfig: BaggageConfig
   dismissedItems: DismissedItemRecord[] // Preserves full snapshots preventing resurrection
+  normalizedContext?: NormalizedTripContext
   engineVersion: string
   createdAt: string
   updatedAt: string
