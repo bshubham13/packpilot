@@ -144,27 +144,120 @@ describe('JourneyService — Pure Journey & Transport Calculations', () => {
     })
   })
 
-  describe('TransportMode[] Adaptation (Guardrail 1)', () => {
-    it('adapts legacy multi-mode array [flight, car] preserving secondary modes and destination mobility', () => {
+  describe('TransportMode[] Adaptation & Tri-State Destination Mobility (Guardrail 1 & Milestone 7.2A)', () => {
+    it('adapts legacy [flight, car] preserving secondary modes without assuming destination mobility (undefined)', () => {
       const adapted = adaptTransportModes(['flight', 'car'])
       expect(adapted.primaryTransport).toBe('flight')
       expect(adapted.secondaryTransportModes).toEqual(['car'])
-      expect(adapted.destinationMobility.isDrivingAtDestination).toBe(true)
-      expect(adapted.destinationMobility.isPublicTransitFocused).toBe(false)
+      expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+      expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
+    })
+
+    it('adapts [train, bus] preserving bus as secondary mode without falsely toggling mobility', () => {
+      const adapted = adaptTransportModes(['train', 'bus'])
+      expect(adapted.primaryTransport).toBe('train')
+      expect(adapted.secondaryTransportModes).toEqual(['bus'])
+      expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+      expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
+    })
+
+    it('adapts [flight, bike] preserving bike without assuming local vehicle rental', () => {
+      const adapted = adaptTransportModes(['flight', 'bike'])
+      expect(adapted.primaryTransport).toBe('flight')
+      expect(adapted.secondaryTransportModes).toEqual(['bike'])
+      expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+      expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
+    })
+
+    it('adapts [flight, train] preserving train without assuming local municipal transit', () => {
+      const adapted = adaptTransportModes(['flight', 'train'])
+      expect(adapted.primaryTransport).toBe('flight')
+      expect(adapted.secondaryTransportModes).toEqual(['train'])
+      expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+      expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
+    })
+
+    it('adapts [car, bike] with car as primary and bike as secondary mode', () => {
+      const adapted = adaptTransportModes(['car', 'bike'])
+      expect(adapted.primaryTransport).toBe('car')
+      expect(adapted.secondaryTransportModes).toEqual(['bike'])
+      expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+      expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
     })
 
     it('adapts single train mode correctly', () => {
       const adapted = adaptTransportModes(['train'])
       expect(adapted.primaryTransport).toBe('train')
       expect(adapted.secondaryTransportModes).toEqual([])
-      expect(adapted.destinationMobility.isDrivingAtDestination).toBe(false)
-      expect(adapted.destinationMobility.isPublicTransitFocused).toBe(false)
+      expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+      expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
     })
 
     it('adapts empty transport modes array to flight fallback', () => {
       const adapted = adaptTransportModes([])
       expect(adapted.primaryTransport).toBe('flight')
       expect(adapted.secondaryTransportModes).toEqual([])
+      expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+      expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
+    })
+
+    describe('Tri-state DestinationMobility semantics', () => {
+      it('preserves undefined mobility configuration when not provided', () => {
+        const adapted = adaptTransportModes(['flight'])
+        expect(adapted.destinationMobility).toEqual({
+          isDrivingAtDestination: undefined,
+          isPublicTransitFocused: undefined,
+        })
+      })
+
+      it('preserves explicitly false flags without normalizing to true or dropping', () => {
+        const adapted = adaptTransportModes(['flight'], {
+          isDrivingAtDestination: false,
+          isPublicTransitFocused: false,
+        })
+        expect(adapted.destinationMobility).toEqual({
+          isDrivingAtDestination: false,
+          isPublicTransitFocused: false,
+        })
+      })
+
+      it('preserves explicitly true flags', () => {
+        const adapted = adaptTransportModes(['flight'], {
+          isDrivingAtDestination: true,
+          isPublicTransitFocused: true,
+        })
+        expect(adapted.destinationMobility).toEqual({
+          isDrivingAtDestination: true,
+          isPublicTransitFocused: true,
+        })
+      })
+
+      it('supports partial configuration where only isDrivingAtDestination is provided', () => {
+        const adaptedTrue = adaptTransportModes(['flight'], { isDrivingAtDestination: true })
+        expect(adaptedTrue.destinationMobility.isDrivingAtDestination).toBe(true)
+        expect(adaptedTrue.destinationMobility.isPublicTransitFocused).toBeUndefined()
+
+        const adaptedFalse = adaptTransportModes(['flight'], { isDrivingAtDestination: false })
+        expect(adaptedFalse.destinationMobility.isDrivingAtDestination).toBe(false)
+        expect(adaptedFalse.destinationMobility.isPublicTransitFocused).toBeUndefined()
+      })
+
+      it('supports partial configuration where only isPublicTransitFocused is provided', () => {
+        const adaptedTrue = adaptTransportModes(['train', 'bus'], { isPublicTransitFocused: true })
+        expect(adaptedTrue.destinationMobility.isDrivingAtDestination).toBeUndefined()
+        expect(adaptedTrue.destinationMobility.isPublicTransitFocused).toBe(true)
+
+        const adaptedFalse = adaptTransportModes(['train', 'bus'], { isPublicTransitFocused: false })
+        expect(adaptedFalse.destinationMobility.isDrivingAtDestination).toBeUndefined()
+        expect(adaptedFalse.destinationMobility.isPublicTransitFocused).toBe(false)
+      })
+
+      it('preserves undefined mobility for legacy trips without destinationMobility property', () => {
+        const legacyModes: ('car' | 'flight' | 'train' | 'bus' | 'bike' | 'other')[] = ['flight', 'car']
+        const adapted = adaptTransportModes(legacyModes, undefined)
+        expect(adapted.destinationMobility.isDrivingAtDestination).toBeUndefined()
+        expect(adapted.destinationMobility.isPublicTransitFocused).toBeUndefined()
+      })
     })
   })
 })

@@ -122,8 +122,8 @@ export interface DurationRangeHours {
 }
 
 export interface DestinationMobility {
-  isDrivingAtDestination: boolean
-  isPublicTransitFocused: boolean
+  isDrivingAtDestination?: boolean
+  isPublicTransitFocused?: boolean
 }
 
 export interface JourneyContext {

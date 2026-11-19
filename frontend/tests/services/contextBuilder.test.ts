@@ -104,10 +104,45 @@ describe('ContextBuilder — NormalizedTripContext Assembly', () => {
     expect(context.journey.classification).toBe('unknown')
   })
 
-  it('marks legacy trips with contextState: legacy', () => {
+  it('marks legacy trips with contextState: legacy and preserves undefined destinationMobility', () => {
     const legacyContext = createLegacyNormalizedContext(baseTripConfig, 'trip-old-123')
     expect(legacyContext.contextState).toBe('legacy')
     expect(legacyContext.tripId).toBe('trip-old-123')
+    expect(legacyContext.journey.destinationMobility.isDrivingAtDestination).toBeUndefined()
+    expect(legacyContext.journey.destinationMobility.isPublicTransitFocused).toBeUndefined()
+  })
+
+  it('preserves tri-state destination mobility in normalized trip context', () => {
+    // 1. Explicitly false flags
+    const falseMobilityTrip: TripConfig = {
+      ...baseTripConfig,
+      destinationMobility: { isDrivingAtDestination: false, isPublicTransitFocused: false },
+    }
+    const falseContext = buildNormalizedTripContext(falseMobilityTrip)
+    expect(falseContext.journey.destinationMobility).toEqual({
+      isDrivingAtDestination: false,
+      isPublicTransitFocused: false,
+    })
+
+    // 2. Explicitly true flags
+    const trueMobilityTrip: TripConfig = {
+      ...baseTripConfig,
+      destinationMobility: { isDrivingAtDestination: true, isPublicTransitFocused: true },
+    }
+    const trueContext = buildNormalizedTripContext(trueMobilityTrip)
+    expect(trueContext.journey.destinationMobility).toEqual({
+      isDrivingAtDestination: true,
+      isPublicTransitFocused: true,
+    })
+
+    // 3. Partial configuration (only isDrivingAtDestination specified)
+    const partialTrip: TripConfig = {
+      ...baseTripConfig,
+      destinationMobility: { isDrivingAtDestination: true },
+    }
+    const partialContext = buildNormalizedTripContext(partialTrip)
+    expect(partialContext.journey.destinationMobility.isDrivingAtDestination).toBe(true)
+    expect(partialContext.journey.destinationMobility.isPublicTransitFocused).toBeUndefined()
   })
 
   it('preserves unknown environmental measurements as undefined, not false or 0 (Guardrail 3)', () => {

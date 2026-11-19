@@ -96,7 +96,7 @@ export function buildNormalizedTripContext(
     destination.city
   )
 
-  const adapted = adaptTransportModes(config.transportModes)
+  const adapted = adaptTransportModes(config.transportModes, config.destinationMobility)
   const primaryTransport = config.primaryTransport || adapted.primaryTransport
   const destinationMobility = {
     isDrivingAtDestination:
