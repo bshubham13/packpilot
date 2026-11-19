@@ -38,7 +38,7 @@ let activeInitPromise: Promise<void> | null = null
 export const useTripStore = create<TripState>((set, get) => ({
   trips: [],
   activeTrip: null,
-  isLoading: false,
+  isLoading: true,
   isInitialized: false,
   error: null,
   storageType: 'memory',
@@ -86,6 +86,9 @@ export const useTripStore = create<TripState>((set, get) => ({
   },
 
   loadTrips: async () => {
+    if (activeInitPromise) {
+      await activeInitPromise
+    }
     set({ isLoading: true, error: null })
     try {
       const storage = getStorageContext()
@@ -98,6 +101,9 @@ export const useTripStore = create<TripState>((set, get) => ({
   },
 
   selectTrip: async (id: string | null) => {
+    if (activeInitPromise) {
+      await activeInitPromise
+    }
     if (!id) {
       set({ activeTrip: null })
       return null
@@ -124,6 +130,9 @@ export const useTripStore = create<TripState>((set, get) => ({
   },
 
   createTrip: async (config: TripConfig) => {
+    if (activeInitPromise) {
+      await activeInitPromise
+    }
     set({ isLoading: true, error: null })
     try {
       const storage = getStorageContext()

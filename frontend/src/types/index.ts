@@ -3,6 +3,15 @@
  * Specification Version: 1.4.0
  */
 
+import type {
+  ResolvedLocation,
+  OvernightSelection,
+  DestinationMobility,
+  NormalizedTripContext,
+} from './context'
+
+export * from './context'
+
 export type TransportMode =
   | 'flight'
   | 'train'
@@ -48,6 +57,8 @@ export type ItemPriority =
   | 'critical'    // Weight = 3 (Passport, Meds, Tickets)
   | 'recommended' // Weight = 2 (Chargers, Sunscreen, Rainwear)
   | 'optional'    // Weight = 1 (Books, Eye mask, Travel pillow)
+
+export type BagAssignment = 'cabin' | 'checked'
 
 /**
  * Strategy-driven quantity calculation methodology
@@ -152,6 +163,12 @@ export interface DismissedItemRecord {
 export interface TripConfig {
   name: string
   destination: string
+  origin?: string                    // Optional origin city string
+  originLocation?: ResolvedLocation  // Structured resolved location
+  destinationLocation?: ResolvedLocation
+  overnightSelection?: OvernightSelection
+  primaryTransport?: TransportMode
+  destinationMobility?: DestinationMobility
   startDate: string                  // ISO 8601 YYYY-MM-DD
   endDate: string                    // ISO 8601 YYYY-MM-DD
   transportModes: TransportMode[]
@@ -175,6 +192,7 @@ export interface Trip extends TripConfig {
   personalPreferences: string[]
   baggageConfig: BaggageConfig
   dismissedItems: DismissedItemRecord[] // Preserves full snapshots preventing resurrection
+  normalizedContext?: NormalizedTripContext
   engineVersion: string
   createdAt: string
   updatedAt: string
@@ -201,6 +219,9 @@ export interface PackingItem {
   // Physical Weight Metadata (Stored per unit only; Total is derived at runtime)
   weightGrams?: number           // Unit weight in grams (undefined if unknown)
   
+  // Bag Assignment (undefined indicates unassigned)
+  bagAssignment?: BagAssignment
+
   // Multi-Traveller & Attribution
   isShared: boolean              // True if item is shared across travellers
   assignedTo?: string            // Specific traveller tag (e.g., "Infant", "Teen")
@@ -251,20 +272,61 @@ export interface ReadinessScore {
   isFullyReady: boolean              // True if percentage === 100 AND !hasOutstandingCritical
 }
 
+export interface BagWeightSummary {
+  bagType: 'cabin' | 'checked'
+  isConfigured: boolean
+  limitKg: number
+  knownWeightGrams: number
+  knownWeightKg: number
+  knownWeightLbs: number
+  remainingCapacityKg: number
+  exceededAmountKg: number
+  percentageUsed: number
+  itemsWithKnownWeightCount: number
+  itemsWithUnknownWeightCount: number
+  hasUnknownWeights: boolean
+  isLimitExceeded: boolean
+}
+
+export interface UnassignedWeightSummary {
+  knownWeightGrams: number
+  knownWeightKg: number
+  knownWeightLbs: number
+  itemsWithKnownWeightCount: number
+  itemsWithUnknownWeightCount: number
+  totalItemCount: number
+  hasUnknownWeights: boolean
+}
+
+export interface CombinedWeightSummary {
+  totalKnownWeightGrams: number
+  totalKnownWeightKg: number
+  totalKnownWeightLbs: number
+  totalItemsWithKnownWeightCount: number
+  totalItemsWithUnknownWeightCount: number
+  hasUnknownWeights: boolean
+}
+
 export interface WeightEstimate {
+  // Independent Bag Breakdowns
+  cabin: BagWeightSummary
+  checked: BagWeightSummary
+  unassigned: UnassignedWeightSummary
+
+  // Combined Informational Summary (No combined limit evaluation)
+  combined: CombinedWeightSummary
+
+  // Backward-compatible accessors for existing consumers
   totalKnownWeightGrams: number
   totalKnownWeightKg: number
   totalKnownWeightLbs: number
   itemsWithKnownWeightCount: number
   itemsWithUnknownWeightCount: number
   hasUnknownWeights: boolean
-  
-  // Baggage Limits Evaluation
   cabinLimitKg: number
   checkedLimitKg: number
   isCabinConfigured: boolean
   isCheckedConfigured: boolean
   isExceedingCabinLimit: boolean
   isExceedingCheckedLimit: boolean
-  isExceedingCombinedLimit: boolean
 }

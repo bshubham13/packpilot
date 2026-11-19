@@ -3,7 +3,7 @@
  * Detects whether IndexedDB is functional or blocked (e.g. private browsing in Firefox/Safari, or disabled).
  */
 
-export async function probeIndexedDB(timeoutMs = 1500): Promise<boolean> {
+export async function probeIndexedDB(timeoutMs = 5000): Promise<boolean> {
   // Check if indexedDB API is present in global scope
   const idb = typeof indexedDB !== 'undefined'
     ? indexedDB
@@ -17,7 +17,7 @@ export async function probeIndexedDB(timeoutMs = 1500): Promise<boolean> {
 
   return new Promise<boolean>((resolve) => {
     let resolved = false
-    const probeDbName = `__packpilot_probe_${Date.now()}__`
+    const probeDbName = '__packpilot_health_probe__'
 
     const timer = setTimeout(() => {
       if (!resolved) {
@@ -36,7 +36,6 @@ export async function probeIndexedDB(timeoutMs = 1500): Promise<boolean> {
           try {
             const db = request.result
             db.close()
-            idb.deleteDatabase(probeDbName)
           } catch {
             // Cleanup error ignored
           }
@@ -44,7 +43,12 @@ export async function probeIndexedDB(timeoutMs = 1500): Promise<boolean> {
         }
       }
 
-      request.onerror = () => {
+      request.onerror = (e) => {
+        try {
+          e.preventDefault?.()
+        } catch {
+          // Ignore
+        }
         if (!resolved) {
           resolved = true
           clearTimeout(timer)
@@ -52,7 +56,12 @@ export async function probeIndexedDB(timeoutMs = 1500): Promise<boolean> {
         }
       }
 
-      request.onblocked = () => {
+      request.onblocked = (e) => {
+        try {
+          e.preventDefault?.()
+        } catch {
+          // Ignore
+        }
         if (!resolved) {
           resolved = true
           clearTimeout(timer)

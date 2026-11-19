@@ -10,6 +10,7 @@ import type {
   PackingCategory,
   ItemPriority,
   TripConfig,
+  BagAssignment,
 } from '../types'
 import { getStorageContext } from '../db/factory'
 import { generateRecommendations } from '../engine'
@@ -32,12 +33,26 @@ export interface ChecklistState {
   togglePacked: (itemId: string) => Promise<void>
   setPackedQuantity: (itemId: string, packedQuantity: number) => Promise<void>
   updateItemQuantity: (itemId: string, userQuantity: number) => Promise<void>
+  setBagAssignment: (itemId: string, assignment: BagAssignment | undefined) => Promise<void>
+  updateItem: (
+    itemId: string,
+    updates: {
+      name?: string
+      category?: PackingCategory
+      priority?: ItemPriority
+      quantity?: number
+      weightGrams?: number
+      bagAssignment?: BagAssignment
+      notes?: string
+    }
+  ) => Promise<PackingItem | undefined>
   addCustomItem: (itemData: {
     name: string
     category: PackingCategory
     quantity?: number
     priority?: ItemPriority
     weightGrams?: number
+    bagAssignment?: BagAssignment
     isShared?: boolean
     notes?: string
   }) => Promise<PackingItem>
@@ -187,6 +202,81 @@ export const useChecklistStore = create<ChecklistState>((set, get) => ({
     }
   },
 
+  setBagAssignment: async (itemId: string, assignment: BagAssignment | undefined) => {
+    const item = get().items.find((i) => i.id === itemId)
+    if (!item) return
+
+    const updatedItem: PackingItem = {
+      ...item,
+      bagAssignment: assignment,
+      updatedAt: new Date().toISOString(),
+    }
+
+    // Optimistic in-memory update
+    set((state) => ({
+      items: state.items.map((i) => (i.id === itemId ? updatedItem : i)),
+    }))
+
+    try {
+      const storage = getStorageContext()
+      await storage.items.saveItem(updatedItem)
+    } catch (err: unknown) {
+      // Rollback on failure
+      set((state) => ({
+        items: state.items.map((i) => (i.id === itemId ? item : i)),
+        error: err instanceof Error ? err.message : 'Failed to update bag assignment',
+      }))
+    }
+  },
+
+  updateItem: async (itemId, updates) => {
+    const item = get().items.find((i) => i.id === itemId)
+    if (!item) return undefined
+
+    let safeEffectiveQty = item.effectiveQuantity
+    let userAdjustedQuantity = item.userAdjustedQuantity
+
+    if (updates.quantity !== undefined) {
+      safeEffectiveQty = Math.max(1, Math.round(updates.quantity || 1))
+      userAdjustedQuantity = safeEffectiveQty
+    }
+
+    const clampedPacked = Math.min(item.packedQuantity, safeEffectiveQty)
+    const isPacked = safeEffectiveQty > 0 && clampedPacked >= safeEffectiveQty
+
+    const updatedItem: PackingItem = {
+      ...item,
+      name: updates.name !== undefined ? updates.name.trim() || item.name : item.name,
+      category: updates.category || item.category,
+      priority: updates.priority || item.priority,
+      userAdjustedQuantity,
+      effectiveQuantity: safeEffectiveQty,
+      packedQuantity: clampedPacked,
+      isPacked,
+      weightGrams: updates.weightGrams !== undefined ? updates.weightGrams : item.weightGrams,
+      bagAssignment: 'bagAssignment' in updates ? updates.bagAssignment : item.bagAssignment,
+      notes: updates.notes !== undefined ? updates.notes : item.notes,
+      updatedAt: new Date().toISOString(),
+    }
+
+    // Optimistic in-memory update
+    set((state) => ({
+      items: state.items.map((i) => (i.id === itemId ? updatedItem : i)),
+    }))
+
+    try {
+      const storage = getStorageContext()
+      await storage.items.saveItem(updatedItem)
+      return updatedItem
+    } catch (err: unknown) {
+      set((state) => ({
+        items: state.items.map((i) => (i.id === itemId ? item : i)),
+        error: err instanceof Error ? err.message : 'Failed to update item',
+      }))
+      throw err
+    }
+  },
+
   addCustomItem: async (itemData) => {
     const tripId = get().tripId
     if (!tripId) {
@@ -211,6 +301,7 @@ export const useChecklistStore = create<ChecklistState>((set, get) => ({
       packedQuantity: 0,
       isPacked: false,
       weightGrams: itemData.weightGrams,
+      bagAssignment: itemData.bagAssignment,
       isShared: Boolean(itemData.isShared),
       isCustom: true,
       reasons: ['User-added custom travel item'],
