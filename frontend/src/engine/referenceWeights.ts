@@ -14,6 +14,7 @@ export const REFERENCE_WEIGHTS: Record<string, number> = {
   'doc-boarding-pass': 0,
   'doc-vehicle-registration': 15,
   'doc-driver-licence': 15,
+  'doc-transit-pass': 10,
   'doc-train-ticket': 10,
   'doc-medical-note': 10,
   'doc-insurance-card': 10,
@@ -44,6 +45,7 @@ export const REFERENCE_WEIGHTS: Record<string, number> = {
   'wear-moto-rainsuit': 650,
   'wear-travel-blanket': 290,
   'wear-flight-comfort': 180,
+  'wear-neck-pillow': 190,
   'wear-dorm-earplugs': 30,
 
   // Toiletries
@@ -78,6 +80,7 @@ export const REFERENCE_WEIGHTS: Record<string, number> = {
   'gear-sleeping-bag': 1200,
   'gear-sleeping-pad': 520,
   'gear-camp-stove': 410,
+  'gear-reusable-bottle': 160,
   'gear-water-bladder': 250,
   'gear-trekking-poles': 480,
   'gear-sunglasses-uv': 40,
@@ -97,6 +100,7 @@ export const REFERENCE_WEIGHTS: Record<string, number> = {
   'health-blister-kit': 30,
   'health-electrolytes': 60,
   'health-first-aid-kit': 320,
+  'health-motion-relief': 20,
   'health-pediatric-kit': 180,
 
   // Baby & Family Care

@@ -31,6 +31,7 @@ export * from './deduplication'
 export * from './reconciler'
 export * from './quantityCalculator'
 export * from './referenceWeights'
+export * from './rules/journeyRules'
 
 export interface RecommendationPipelineOptions {
   existingItems?: PackingItem[]
