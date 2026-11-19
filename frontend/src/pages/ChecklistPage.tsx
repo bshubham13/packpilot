@@ -26,9 +26,10 @@ import {
   AlertTriangle,
   Archive,
 } from 'lucide-react'
-import { useTripStore } from '../stores/tripStore'
+import { useTripStore, type TripResolutionStatus } from '../stores/tripStore'
 import { useChecklistStore } from '../stores/checklistStore'
 import { Card, Button, Badge, Modal } from '../components/ui'
+import { TravelIntelligenceCard } from '../components/intelligence'
 import { formatDisplayDate } from '../utils/dates'
 import { calculateReadinessScore } from '../utils/scoring'
 import {
@@ -910,6 +911,23 @@ export function ChecklistPage() {
   const activeTripFromStore = useTripStore((state) => state.activeTrip)
   const tripsFromStore = useTripStore((state) => state.trips)
   const selectTrip = useTripStore((state) => state.selectTrip)
+  const tripResolutionStatus: TripResolutionStatus = useTripStore(
+    (state) => (id ? state.resolutionStatus[id] : undefined) || 'idle'
+  )
+  const refreshTripContext = useTripStore((state) => state.refreshTripContext)
+  const [isRefreshingIntelligence, setIsRefreshingIntelligence] = useState<boolean>(false)
+
+  const handleRefreshIntelligence = useCallback(async () => {
+    if (!id || isRefreshingIntelligence || tripResolutionStatus === 'resolving') return
+    setIsRefreshingIntelligence(true)
+    try {
+      await refreshTripContext(id)
+    } catch (err: unknown) {
+      console.error('Failed to refresh trip intelligence insights:', err)
+    } finally {
+      setIsRefreshingIntelligence(false)
+    }
+  }, [id, isRefreshingIntelligence, tripResolutionStatus, refreshTripContext])
 
   const currentTripIdInChecklistStore = useChecklistStore((state) => state.tripId)
   const itemsInChecklistStore = useChecklistStore((state) => state.items)
@@ -1294,6 +1312,16 @@ export function ChecklistPage() {
           </p>
         </div>
 
+        {/* Travel Intelligence Section */}
+        <section aria-label="Travel Intelligence" className="space-y-3">
+          <TravelIntelligenceCard
+            context={currentTrip.normalizedContext}
+            resolutionStatus={tripResolutionStatus}
+            onRefresh={handleRefreshIntelligence}
+            isRefreshing={isRefreshingIntelligence}
+          />
+        </section>
+
         <Card variant="polaroid" hasTape className="p-6 text-center space-y-4">
           <div className="w-12 h-12 rounded-full bg-sand/20 text-ink-black/60 flex items-center justify-center mx-auto">
             <Luggage className="w-6 h-6" aria-hidden="true" />
@@ -1548,6 +1576,33 @@ export function ChecklistPage() {
           </div>
         </div>
       </div>
+
+      {/* Travel Intelligence Section */}
+      <section aria-label="Travel Intelligence" className="space-y-3">
+        <TravelIntelligenceCard
+          context={currentTrip.normalizedContext}
+          resolutionStatus={tripResolutionStatus}
+          onRefresh={handleRefreshIntelligence}
+          isRefreshing={isRefreshingIntelligence}
+        />
+        {!currentTrip.normalizedContext && (tripResolutionStatus === 'idle' || !tripResolutionStatus) && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-card bg-sand/15 border border-sand/30 text-xs text-ink-muted">
+            <div className="flex items-center gap-2">
+              <Compass className="w-4 h-4 text-terracotta shrink-0" aria-hidden="true" />
+              <span>Travel insights have not been generated for this journey yet.</span>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRefreshIntelligence}
+              disabled={isRefreshingIntelligence}
+              className="shrink-0 font-medium"
+            >
+              Generate Insights
+            </Button>
+          </div>
+        )}
+      </section>
 
       {/* Overall Readiness Summary Widget */}
       <Card variant="polaroid" hasTape className="p-4 sm:p-5">
