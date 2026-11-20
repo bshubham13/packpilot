@@ -5,3 +5,5 @@
 
 export * from '../types/backup'
 export * from '../services/backupService'
+export * from '../services/restoreCoordinator'
+export * from './download'

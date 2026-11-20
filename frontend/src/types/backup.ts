@@ -40,6 +40,8 @@ export interface RestoreResult {
   skipped: BackupCollectionCounts
   conflicts: BackupCollectionCounts
   errors: string[]
+  storageCommitted?: boolean
+  syncError?: string
 }
 
 export interface RestoreOptions {

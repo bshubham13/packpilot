@@ -42,12 +42,43 @@ export interface TripState {
 
 let activeInitPromise: Promise<void> | null = null
 
-// Per-trip monotonic resolution version token to discard stale context resolutions
+// Globally monotonic resolution token counter across the application session
+let globalResolutionCounter = 0
+
+// Per-trip active resolution version token to discard stale context resolutions
 const tripResolutionTokens = new Map<string, number>()
+
+/**
+ * Generates a globally unique, monotonically increasing resolution token for a trip.
+ * Guarantees that token values are never recycled or reset, preventing cross-trip
+ * or temporal token collisions between pre- and post-restore resolutions.
+ */
+function nextResolutionToken(tripId: string): number {
+  const token = ++globalResolutionCounter
+  tripResolutionTokens.set(tripId, token)
+  return token
+}
 
 export function _resetTripStoreTracking(): void {
   clearTripQueue()
   tripResolutionTokens.clear()
+  globalResolutionCounter = 0
+}
+
+/**
+ * Invalidates all active and pending background context resolutions across all trips.
+ * Advances the active token for every currently tracked trip to a new globally unique
+ * value so that any in-flight resolver (weather/geo) observes a token mismatch and
+ * silently discards its result without persisting or updating Zustand stores.
+ *
+ * Does NOT clear the map, ensuring that any subsequent resolution token generated
+ * for these trips or new trips will be strictly greater and never collide with
+ * in-flight pre-invalidation resolvers.
+ */
+export function invalidateAllTripResolutionTokens(): void {
+  for (const tripId of tripResolutionTokens.keys()) {
+    tripResolutionTokens.set(tripId, ++globalResolutionCounter)
+  }
 }
 
 function hasNetworkContextChange(current: Trip, updates: Partial<TripConfig>): boolean {
@@ -382,9 +413,8 @@ export const useTripStore = create<TripState>((set, get) => ({
       // Atomically persist initial trip record and its generated child items
       await storage.trips.saveTripWithItems(newTrip, items)
 
-      // Start resolution token tracking
-      const token = 1
-      tripResolutionTokens.set(tripId, token)
+      // Start resolution token tracking with globally monotonic generator
+      const token = nextResolutionToken(tripId)
 
       set((state) => ({
         trips: [newTrip, ...state.trips],
@@ -464,8 +494,7 @@ export const useTripStore = create<TripState>((set, get) => ({
             ...updatedFields,
           }
 
-          const token = (tripResolutionTokens.get(id) ?? 0) + 1
-          tripResolutionTokens.set(id, token)
+          const token = nextResolutionToken(id)
 
           set((state) => ({
             trips: state.trips.map((t) => (t.id === id ? updatedTrip : t)),
@@ -589,8 +618,7 @@ export const useTripStore = create<TripState>((set, get) => ({
 
   deleteTrip: async (id: string) => {
     // 1. Invalidate resolution token immediately to cancel background resolution
-    const nextToken = (tripResolutionTokens.get(id) ?? 0) + 1
-    tripResolutionTokens.set(id, nextToken)
+    nextResolutionToken(id)
 
     // 2. Serialize deletion through the per-trip queue so prior operations finish cleanly
     return enqueueTripOperation(id, async () => {
@@ -634,8 +662,8 @@ export const useTripStore = create<TripState>((set, get) => ({
       const storage = getStorageContext()
       const duplicatedTrip = await storage.trips.duplicateTrip(id, undefined, newName)
 
-      // Initialize distinct token for the duplicate trip
-      tripResolutionTokens.set(duplicatedTrip.id, 0)
+      // Initialize distinct token for the duplicate trip with globally monotonic generator
+      nextResolutionToken(duplicatedTrip.id)
 
       set((state) => ({
         trips: [duplicatedTrip, ...state.trips],
@@ -662,8 +690,7 @@ export const useTripStore = create<TripState>((set, get) => ({
       throw new Error(`Trip not found: ${tripId}`)
     }
 
-    const token = (tripResolutionTokens.get(tripId) ?? 0) + 1
-    tripResolutionTokens.set(tripId, token)
+    const token = nextResolutionToken(tripId)
 
     set((state) => ({
       resolutionStatus: {
