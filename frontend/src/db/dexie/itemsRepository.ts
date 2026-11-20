@@ -18,6 +18,10 @@ export class DexieItemsRepository implements IItemsRepository {
     return this.db.items.where('tripId').equals(tripId).toArray()
   }
 
+  async getAllItems(): Promise<PackingItem[]> {
+    return this.db.items.toArray()
+  }
+
   async getItemById(itemId: string): Promise<PackingItem | null> {
     const item = await this.db.items.get(itemId)
     return item || null

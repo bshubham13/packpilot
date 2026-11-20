@@ -32,6 +32,7 @@ export interface IItemsRepository {
   restoreDismissedItem(tripId: string, itemSlug: string): Promise<PackingItem>
   reconcileTripItems(tripId: string, updatedItems: PackingItem[]): Promise<void>
   deleteItemsForTrip(tripId: string): Promise<void>
+  getAllItems(): Promise<PackingItem[]>
 }
 
 export interface ITemplatesRepository {
@@ -54,6 +55,33 @@ export interface ICacheRepository {
   clear(): Promise<void>
 }
 
+export interface BackupDataSnapshot {
+  trips: Trip[]
+  items: PackingItem[]
+  templates: PackingTemplate[]
+}
+
+export interface BackupRestoreCounts {
+  trips: number
+  items: number
+  templates: number
+}
+
+export interface BackupRestoreResult {
+  imported: BackupRestoreCounts
+  skipped: BackupRestoreCounts
+  conflicts: BackupRestoreCounts
+}
+
+export interface IBackupRepository {
+  createSnapshot(): Promise<BackupDataSnapshot>
+  atomicRestore(
+    data: BackupDataSnapshot,
+    mode: 'replace' | 'merge',
+    conflictStrategy?: 'skip' | 'overwrite'
+  ): Promise<BackupRestoreResult>
+}
+
 export type StorageType = 'indexeddb' | 'memory'
 
 export interface StorageContext {
@@ -61,6 +89,7 @@ export interface StorageContext {
   items: IItemsRepository
   templates: ITemplatesRepository
   cache: ICacheRepository
+  backup: IBackupRepository
   isStorageAvailable: boolean
   storageType: StorageType
 }

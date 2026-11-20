@@ -11,6 +11,7 @@ import type {
 } from './context'
 
 export * from './context'
+export * from './backup'
 
 export type TransportMode =
   | 'flight'

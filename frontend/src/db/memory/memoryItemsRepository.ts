@@ -24,6 +24,10 @@ export class MemoryItemsRepository implements IItemsRepository {
     return result
   }
 
+  async getAllItems(): Promise<PackingItem[]> {
+    return Array.from(this.state.items.values()).map((item) => ({ ...item }))
+  }
+
   async getItemById(itemId: string): Promise<PackingItem | null> {
     const item = this.state.items.get(itemId)
     return item ? { ...item } : null
