@@ -3,7 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Compass, AlertCircle, RefreshCw } from 'lucide-react'
 import { useTripStore } from './stores/tripStore'
 import { Layout } from './components/layout'
-import { HomePage, TripDashboardPage, TripWizardPage, ChecklistPage } from './pages'
+import { HomePage, TripDashboardPage, TripWizardPage, ChecklistPage, TemplatesPage } from './pages'
 import { Button, Card, Badge } from './components/ui'
 import './App.css'
 
@@ -84,6 +84,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/trips" element={<TripDashboardPage />} />
+          <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/wizard/new" element={<TripWizardPage />} />
           <Route path="/trips/:id" element={<ChecklistPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -38,6 +38,7 @@ export * from './quantityCalculator'
 export * from './referenceWeights'
 export * from './rules/journeyRules'
 export * from './fallbackContext'
+export * from './applyTemplate'
 
 export interface RecommendationPipelineOptions {
   existingItems?: PackingItem[]

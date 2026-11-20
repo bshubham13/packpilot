@@ -12,9 +12,14 @@ import type {
   ItemPriority,
   TripConfig,
   BagAssignment,
+  PackingTemplate,
 } from '../types'
 import { getStorageContext } from '../db/factory'
-import { generateRecommendations } from '../engine'
+import {
+  generateRecommendations,
+  applyTemplateToChecklist,
+  type ApplyTemplateResult,
+} from '../engine'
 import { generateUUID } from '../utils/uuid'
 import { enqueueTripOperation } from './mutationQueue'
 
@@ -62,6 +67,7 @@ export interface ChecklistState {
   dismissItem: (itemId: string) => Promise<DismissedItemRecord>
   restoreDismissedItem: (itemSlug: string) => Promise<PackingItem>
   regenerateChecklist: (tripConfig: TripConfig) => Promise<void>
+  applyTemplate: (template: PackingTemplate) => Promise<ApplyTemplateResult>
   setActiveCategory: (category: PackingCategory | 'all') => void
   setFilterStatus: (status: FilterStatus) => void
   setSearchQuery: (query: string) => void
@@ -475,6 +481,65 @@ export const useChecklistStore = create<ChecklistState>((set, get) => ({
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : 'Failed to regenerate checklist'
         set({ error: errorMsg, isLoading: false })
+        throw err
+      }
+    })
+  },
+
+  applyTemplate: async (template: PackingTemplate): Promise<ApplyTemplateResult> => {
+    const targetTripId = get().tripId
+    if (!targetTripId) {
+      throw new Error('Cannot apply template: no active trip loaded')
+    }
+
+    return enqueueTripOperation(targetTripId, async () => {
+      const storage = getStorageContext()
+      const isStoreOnTargetTrip = get().tripId === targetTripId
+
+      if (isStoreOnTargetTrip) {
+        set({ isLoading: true, error: null })
+      }
+
+      try {
+        let existingItems: PackingItem[]
+        let dismissedRecords: DismissedItemRecord[]
+
+        if (get().tripId === targetTripId) {
+          existingItems = get().items
+          dismissedRecords = get().dismissedRecords
+        } else {
+          // Store switched to another trip; read original trip's records from storage
+          const [persistedItems, persistedTrip] = await Promise.all([
+            storage.items.getItemsForTrip(targetTripId),
+            storage.trips.getTripById(targetTripId),
+          ])
+          existingItems = persistedItems
+          dismissedRecords = persistedTrip?.dismissedItems ?? []
+        }
+
+        const result = applyTemplateToChecklist(template, {
+          tripId: targetTripId,
+          existingItems,
+          dismissedRecords,
+        })
+
+        // Persist reconciled items atomically for the target trip
+        await storage.items.reconcileTripItems(targetTripId, result.items)
+
+        // Only update in-memory Zustand checklist if the active trip has not switched
+        if (get().tripId === targetTripId) {
+          set({
+            items: result.items,
+            isLoading: false,
+          })
+        }
+
+        return result
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to apply template'
+        if (get().tripId === targetTripId) {
+          set({ error: errorMsg, isLoading: false })
+        }
         throw err
       }
     })

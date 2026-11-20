@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server'
 import { MemoryRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useTripStore } from '../../src/stores/tripStore'
 import { StorageBanner, Header, Layout } from '../../src/components/layout'
-import { HomePage, TripDashboardPage, TripWizardPage, ChecklistPage } from '../../src/pages'
+import { HomePage, TripDashboardPage, TripWizardPage, ChecklistPage, TemplatesPage } from '../../src/pages'
 import { App } from '../../src/App'
 import * as factoryModule from '../../src/db/factory'
 
@@ -66,8 +66,9 @@ describe('Application Shell, Router & Storage Banner (Milestone 1 — Phase 6, S
       expect(html).toContain('href="/wizard/new"')
       expect(html).toContain('Plan a Trip')
 
-      // Verifies no non-functional Templates or Settings links were created
-      expect(html).not.toContain('Templates')
+      // Verifies functional Templates link exists and non-functional Settings link was not created
+      expect(html).toContain('Templates')
+      expect(html).toContain('href="/templates"')
       expect(html).not.toContain('Settings')
     })
   })
@@ -121,6 +122,7 @@ describe('Application Shell, Router & Storage Banner (Milestone 1 — Phase 6, S
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/trips" element={<TripDashboardPage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/wizard/new" element={<TripWizardPage />} />
               <Route path="/trips/:id" element={<ChecklistPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -194,6 +196,12 @@ describe('Application Shell, Router & Storage Banner (Milestone 1 — Phase 6, S
       expect(html).toContain('Journey Not Found')
       expect(html).toContain('Trip Record Unavailable')
       expect(html).toContain('Back to My Trips')
+    })
+
+    it('renders the Templates Library page at "/templates"', () => {
+      const html = renderAppWithRoute('/templates')
+      expect(html).toContain('Packing Templates')
+      expect(html).toContain('Browse curated packing foundations')
     })
   })
 

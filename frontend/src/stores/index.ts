@@ -4,3 +4,4 @@
 
 export * from './tripStore'
 export * from './checklistStore'
+export * from './templateStore'

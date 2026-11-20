@@ -41,6 +41,19 @@ export function Header() {
             My Trips
           </NavLink>
 
+          <NavLink
+            to="/templates"
+            className={({ isActive }) =>
+              `font-sans text-xs sm:text-sm font-medium px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terracotta ${
+                isActive
+                  ? 'text-terracotta font-semibold bg-terracotta/10'
+                  : 'text-ink-black/75 hover:text-ink-black hover:bg-sand/20'
+              }`
+            }
+          >
+            Templates
+          </NavLink>
+
           <Link to="/wizard/new" tabIndex={-1}>
             <Button
               variant="primary"

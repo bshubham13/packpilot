@@ -25,11 +25,19 @@ import {
   RotateCcw,
   AlertTriangle,
   Archive,
+  BookmarkPlus,
+  Layers,
+  Info,
 } from 'lucide-react'
 import { useTripStore, type TripResolutionStatus } from '../stores/tripStore'
 import { useChecklistStore } from '../stores/checklistStore'
 import { Card, Button, Badge, Modal } from '../components/ui'
 import { TravelIntelligenceCard } from '../components/intelligence'
+import {
+  SaveTemplateModal,
+  ApplyTemplateModal,
+  RegenerateChecklistModal,
+} from '../components/templates'
 import { formatDisplayDate } from '../utils/dates'
 import { calculateReadinessScore } from '../utils/scoring'
 import {
@@ -37,9 +45,11 @@ import {
   formatWeightDisplay,
   deriveItemTotalWeightGrams,
 } from '../utils/weight'
+import type { ApplyTemplateResult } from '../engine'
 import type {
   PackingCategory,
   PackingItem,
+  PackingTemplate,
   ItemPriority,
   Trip,
   DismissedItemRecord,
@@ -929,6 +939,60 @@ export function ChecklistPage() {
     }
   }, [id, isRefreshingIntelligence, tripResolutionStatus, refreshTripContext])
 
+  // Template & Regeneration Modals State
+  const [isSaveTemplateModalOpen, setIsSaveTemplateModalOpen] = useState(false)
+  const [isApplyTemplateModalOpen, setIsApplyTemplateModalOpen] = useState(false)
+  const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false)
+  const [templateFeedback, setTemplateFeedback] = useState<{
+    type: 'success' | 'info'
+    message: string
+  } | null>(null)
+
+  const handleApplyTemplateSuccess = useCallback(
+    (result: ApplyTemplateResult, template: PackingTemplate) => {
+      if (result.addedCount === 0 && result.mergedCount === 0) {
+        setTemplateFeedback({
+          type: 'info',
+          message: `All items from "${template.name}" are already present on your checklist. No changes needed.`,
+        })
+      } else {
+        const parts: string[] = []
+        if (result.addedCount > 0) {
+          parts.push(`${result.addedCount} item${result.addedCount === 1 ? '' : 's'} added`)
+        }
+        if (result.mergedCount > 0) {
+          parts.push(`${result.mergedCount} item${result.mergedCount === 1 ? '' : 's'} merged`)
+        }
+        if (result.skippedDismissedCount > 0) {
+          parts.push(
+            `${result.skippedDismissedCount} dismissed item${
+              result.skippedDismissedCount === 1 ? '' : 's'
+            } skipped`
+          )
+        }
+        setTemplateFeedback({
+          type: 'success',
+          message: `Applied template "${template.name}": ${parts.join(', ')}.`,
+        })
+      }
+    },
+    []
+  )
+
+  const handleSaveTemplateSuccess = useCallback((template: PackingTemplate) => {
+    setTemplateFeedback({
+      type: 'success',
+      message: `Saved checklist as reusable template "${template.name}".`,
+    })
+  }, [])
+
+  const handleRegenerateSuccess = useCallback(() => {
+    setTemplateFeedback({
+      type: 'success',
+      message: 'Checklist recommendations successfully regenerated from trip parameters.',
+    })
+  }, [])
+
   const currentTripIdInChecklistStore = useChecklistStore((state) => state.tripId)
   const itemsInChecklistStore = useChecklistStore((state) => state.items)
   const dismissedRecordsInStore = useChecklistStore((state) => state.dismissedRecords)
@@ -1341,7 +1405,16 @@ export function ChecklistPage() {
               There are currently no packing items recorded for this trip.
             </p>
           </div>
-          <div className="pt-2 flex items-center justify-center gap-3">
+          <div className="pt-2 flex items-center justify-center gap-3 flex-wrap">
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Layers className="w-3.5 h-3.5" />}
+              onClick={() => setIsApplyTemplateModalOpen(true)}
+              data-testid="empty-apply-template-btn"
+            >
+              Apply Template
+            </Button>
             <Button
               variant="primary"
               size="sm"
@@ -1492,6 +1565,18 @@ export function ChecklistPage() {
             </div>
           </form>
         </Modal>
+
+        {/* Apply Template Modal for empty state */}
+        {currentTrip && (
+          <ApplyTemplateModal
+            isOpen={isApplyTemplateModalOpen}
+            onClose={() => setIsApplyTemplateModalOpen(false)}
+            tripId={currentTrip.id}
+            existingItems={itemsInChecklistStore}
+            dismissedRecords={dismissedRecordsInStore}
+            onApplySuccess={handleApplyTemplateSuccess}
+          />
+        )}
       </div>
     )
   }
@@ -1508,6 +1593,36 @@ export function ChecklistPage() {
           <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
           <span>Back to My Trips</span>
         </Link>
+
+        {/* Template Operation Feedback Banner */}
+        {templateFeedback && (
+          <div
+            role="status"
+            className={`p-3 rounded-card text-xs flex items-center justify-between border ${
+              templateFeedback.type === 'success'
+                ? 'bg-forest-green/10 border-forest-green/30 text-forest-green'
+                : 'bg-blue-50 border-blue-200 text-blue-900'
+            }`}
+            data-testid="template-feedback-banner"
+          >
+            <div className="flex items-center gap-2">
+              {templateFeedback.type === 'success' ? (
+                <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
+              ) : (
+                <Info className="w-4 h-4 shrink-0" aria-hidden="true" />
+              )}
+              <span className="font-medium">{templateFeedback.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTemplateFeedback(null)}
+              className="text-xs font-bold hover:opacity-70 px-1 cursor-pointer"
+              aria-label="Dismiss message"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-1">
@@ -1545,14 +1660,46 @@ export function ChecklistPage() {
             </div>
           </div>
 
-          {/* Add Custom Item Button */}
-          <div className="shrink-0">
+          {/* Action Buttons: Templates & Add Item */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Layers className="w-3.5 h-3.5" />}
+              onClick={() => setIsApplyTemplateModalOpen(true)}
+              className="font-medium"
+              data-testid="apply-template-btn"
+            >
+              Apply Template
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<BookmarkPlus className="w-3.5 h-3.5" />}
+              onClick={() => setIsSaveTemplateModalOpen(true)}
+              className="font-medium"
+              data-testid="save-template-btn"
+            >
+              Save as Template
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+              onClick={() => setIsRegenerateModalOpen(true)}
+              className="font-medium text-ink-black/75 hover:text-terracotta"
+              title="Regenerate checklist recommendations from trip parameters"
+              data-testid="regenerate-checklist-btn"
+            >
+              Regenerate
+            </Button>
             <Button
               variant="primary"
               size="sm"
               leftIcon={<Plus className="w-3.5 h-3.5" />}
               onClick={openAddModal}
               className="w-full sm:w-auto font-medium"
+              data-testid="add-item-btn"
             >
               Add Item
             </Button>
@@ -2276,6 +2423,39 @@ export function ChecklistPage() {
           </div>
         )}
       </Modal>
+
+      {/* Save as Template Modal */}
+      {currentTrip && (
+        <SaveTemplateModal
+          isOpen={isSaveTemplateModalOpen}
+          onClose={() => setIsSaveTemplateModalOpen(false)}
+          tripId={currentTrip.id}
+          items={itemsInChecklistStore}
+          onSuccess={handleSaveTemplateSuccess}
+        />
+      )}
+
+      {/* Apply Template Modal */}
+      {currentTrip && (
+        <ApplyTemplateModal
+          isOpen={isApplyTemplateModalOpen}
+          onClose={() => setIsApplyTemplateModalOpen(false)}
+          tripId={currentTrip.id}
+          existingItems={itemsInChecklistStore}
+          dismissedRecords={dismissedRecordsInStore}
+          onApplySuccess={handleApplyTemplateSuccess}
+        />
+      )}
+
+      {/* Regenerate Confirmation Modal */}
+      {currentTrip && (
+        <RegenerateChecklistModal
+          isOpen={isRegenerateModalOpen}
+          onClose={() => setIsRegenerateModalOpen(false)}
+          trip={currentTrip}
+          onSuccess={handleRegenerateSuccess}
+        />
+      )}
     </div>
   )
 }
