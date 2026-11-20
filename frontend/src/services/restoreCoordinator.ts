@@ -1,7 +1,7 @@
 /**
  * PackPilot — Restore Lifecycle Coordinator
  * Coordinates backup restoration with the existing mutation queue and ensures
- * safe post-restore synchronization across Zustand stores (tripStore and checklistStore).
+ * safe post-restore synchronization across Zustand stores (tripStore, checklistStore, and templateStore).
  * Prevents in-flight mutations from overwriting restored data and silences stale resolutions.
  *
  * Outcome Guarantees:
@@ -25,6 +25,7 @@ import { restoreBackup } from './backupService'
 import { executeMutationBarrier } from '../stores/mutationQueue'
 import { useTripStore, invalidateAllTripResolutionTokens } from '../stores/tripStore'
 import { useChecklistStore } from '../stores/checklistStore'
+import { useTemplateStore } from '../stores/templateStore'
 
 /**
  * Executes a full backup restore behind an exclusive mutation barrier.
@@ -138,6 +139,27 @@ export async function coordinateRestore(
             dismissedRecords: [],
             error: null,
           })
+        }
+      }
+
+      // Reload all packing templates from persistent storage
+      try {
+        await useTemplateStore.getState().loadTemplates()
+      } catch {
+        // templateStore.loadTemplates rethrows, but also populates store.error
+      }
+
+      const templateStoreError = useTemplateStore.getState().error
+      if (templateStoreError) {
+        return {
+          ...result,
+          success: false,
+          storageCommitted: true,
+          syncError: `Failed to reload templates: ${templateStoreError}`,
+          errors: [
+            ...result.errors,
+            `Post-restore synchronization failed: Failed to reload templates: ${templateStoreError}. Restored data was successfully committed to storage, but in-memory state could not be refreshed. Please reload the application to view restored templates.`,
+          ],
         }
       }
 

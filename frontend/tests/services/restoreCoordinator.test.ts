@@ -10,7 +10,8 @@ import {
 } from '../../src/stores/mutationQueue'
 import { useTripStore, _resetTripStoreTracking } from '../../src/stores/tripStore'
 import { useChecklistStore } from '../../src/stores/checklistStore'
-import type { Trip, PackingItem } from '../../src/types'
+import { useTemplateStore } from '../../src/stores/templateStore'
+import type { Trip, PackingItem, PackingTemplate } from '../../src/types'
 import { DEFAULT_BAGGAGE_CONFIG } from '../../src/types'
 import {
   PACKPILOT_APP_ID,
@@ -63,6 +64,29 @@ function createSampleItem(id = 'item-1', tripId = 'trip-1', name = 'Hiking Socks
   }
 }
 
+function createSampleTemplate(id = 'template-custom-test', name = 'Custom Roadtrip'): PackingTemplate {
+  return {
+    id,
+    name,
+    description: 'Roadtrip essentials',
+    isSystem: false,
+    items: [
+      {
+        name: 'Snacks',
+        itemSlug: 'custom-snacks',
+        category: 'gear',
+        quantityStrategy: 'fixed',
+        defaultQuantity: 3,
+        priority: 'recommended',
+        isShared: true,
+        reasons: ['Drive snacks'],
+      },
+    ],
+    createdAt: '2026-08-01T08:00:00Z',
+    updatedAt: '2026-08-01T08:00:00Z',
+  }
+}
+
 describe('Restore Lifecycle Coordinator & Concurrency Safeguards', () => {
   let storage: Awaited<ReturnType<typeof createStorageContext>>
 
@@ -87,6 +111,13 @@ describe('Restore Lifecycle Coordinator & Concurrency Safeguards', () => {
       dismissedRecords: [],
       error: null,
       isLoading: false,
+    })
+
+    useTemplateStore.setState({
+      templates: [],
+      isLoading: false,
+      isInitialized: false,
+      error: null,
     })
   })
 
@@ -601,5 +632,131 @@ describe('Restore Lifecycle Coordinator & Concurrency Safeguards', () => {
       subsequentExecuted = true
     })
     expect(subsequentExecuted).toBe(true)
+  })
+
+  // 13. Template store synchronization: Replace restore
+  it('synchronizes templateStore after successful replace restore', async () => {
+    const oldCustomTemplate = createSampleTemplate('tpl-old', 'Old Custom Template')
+    await storage.templates.saveTemplate(oldCustomTemplate)
+    await useTemplateStore.getState().loadTemplates()
+    expect(useTemplateStore.getState().templates.some((t) => t.id === 'tpl-old')).toBe(true)
+
+    const newCustomTemplate = createSampleTemplate('tpl-new', 'New Custom Template')
+    const backup: PackPilotBackupPayload = {
+      app: PACKPILOT_APP_ID,
+      version: CURRENT_BACKUP_SCHEMA_VERSION,
+      exportedAt: '2026-08-01T00:00:00Z',
+      trips: [createSampleTrip('trip-1')],
+      items: [],
+      templates: [newCustomTemplate],
+    }
+
+    const result = await coordinateRestore(backup, { mode: 'replace' })
+    expect(result.success).toBe(true)
+    expect(result.storageCommitted).toBe(true)
+
+    const templates = useTemplateStore.getState().templates
+    expect(templates.some((t) => t.id === 'tpl-new')).toBe(true)
+    expect(templates.some((t) => t.id === 'tpl-old')).toBe(false)
+    expect(useTemplateStore.getState().isInitialized).toBe(true)
+    expect(useTemplateStore.getState().error).toBeNull()
+  })
+
+  // 14. Template store synchronization: Merge restore
+  it('synchronizes templateStore after successful merge restore', async () => {
+    const existingCustomTemplate = createSampleTemplate('tpl-existing', 'Existing Custom Template')
+    await storage.templates.saveTemplate(existingCustomTemplate)
+    await useTemplateStore.getState().loadTemplates()
+    expect(useTemplateStore.getState().templates.some((t) => t.id === 'tpl-existing')).toBe(true)
+
+    const incomingCustomTemplate = createSampleTemplate('tpl-incoming', 'Incoming Custom Template')
+    const backup: PackPilotBackupPayload = {
+      app: PACKPILOT_APP_ID,
+      version: CURRENT_BACKUP_SCHEMA_VERSION,
+      exportedAt: '2026-08-01T00:00:00Z',
+      trips: [createSampleTrip('trip-1')],
+      items: [],
+      templates: [incomingCustomTemplate],
+    }
+
+    const result = await coordinateRestore(backup, { mode: 'merge' })
+    expect(result.success).toBe(true)
+    expect(result.storageCommitted).toBe(true)
+
+    const templates = useTemplateStore.getState().templates
+    expect(templates.some((t) => t.id === 'tpl-existing')).toBe(true)
+    expect(templates.some((t) => t.id === 'tpl-incoming')).toBe(true)
+    expect(useTemplateStore.getState().isInitialized).toBe(true)
+    expect(useTemplateStore.getState().error).toBeNull()
+  })
+
+  // 15. Template store synchronization: Storage restore failure does not reload templates
+  it('does not call templateStore.loadTemplates when storage restore fails', async () => {
+    const originalLoadTemplates = useTemplateStore.getState().loadTemplates
+    let loadTemplatesCalled = false
+    useTemplateStore.setState({
+      loadTemplates: async () => {
+        loadTemplatesCalled = true
+        return originalLoadTemplates()
+      },
+    })
+
+    vi.spyOn(storage.backup, 'atomicRestore').mockRejectedValueOnce(
+      new Error('Atomic Restore Failed')
+    )
+
+    const backup: PackPilotBackupPayload = {
+      app: PACKPILOT_APP_ID,
+      version: CURRENT_BACKUP_SCHEMA_VERSION,
+      exportedAt: '2026-08-01T00:00:00Z',
+      trips: [createSampleTrip('trip-1')],
+      items: [],
+      templates: [createSampleTemplate('tpl-unrestored')],
+    }
+
+    const result = await coordinateRestore(backup, { mode: 'replace' })
+    expect(result.success).toBe(false)
+    expect(result.storageCommitted).toBe(false)
+    expect(loadTemplatesCalled).toBe(false)
+  })
+
+  // 16. Template store synchronization failure after storage commit
+  it('accurately reports post-restore synchronization failure when templateStore.loadTemplates fails', async () => {
+    const trip1 = createSampleTrip('trip-tpl-sync')
+    await storage.trips.saveTripWithItems(trip1, [])
+    await useTripStore.getState().loadTrips()
+
+    // Mock getAllTemplates to throw when loadTemplates is called
+    vi.spyOn(storage.templates, 'getAllTemplates').mockRejectedValueOnce(
+      new Error('Template Storage Corrupted')
+    )
+
+    const restoredCustomTemplate = createSampleTemplate('tpl-restored', 'Restored In DB Template')
+    const backup: PackPilotBackupPayload = {
+      app: PACKPILOT_APP_ID,
+      version: CURRENT_BACKUP_SCHEMA_VERSION,
+      exportedAt: '2026-08-01T00:00:00Z',
+      trips: [trip1],
+      items: [],
+      templates: [restoredCustomTemplate],
+    }
+
+    const result = await coordinateRestore(backup, { mode: 'replace' })
+
+    // Must report success: false, but storageCommitted: true
+    expect(result.success).toBe(false)
+    expect(result.storageCommitted).toBe(true)
+    expect(result.syncError).toContain('Template Storage Corrupted')
+    expect(result.errors.some((e) => e.includes('Failed to reload templates'))).toBe(true)
+    expect(
+      result.errors.some((e) => e.includes('Please reload the application to view restored templates'))
+    ).toBe(true)
+
+    // Barrier must still be safely released
+    expect(isMutationBarrierActive()).toBe(false)
+
+    // Storage actually contains the committed restored template
+    const storedTemplate = await storage.templates.getTemplateById('tpl-restored')
+    expect(storedTemplate?.name).toBe('Restored In DB Template')
   })
 })
