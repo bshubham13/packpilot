@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Sparkles,
-  MapPin,
   Calendar,
   Users,
   User,
@@ -40,6 +39,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { Card, Button, Badge } from '../components/ui'
+import { CityAutocompleteInput, formatCityLocation } from '../components/location'
 import { validateDateRange, isHistoricalDate, formatDisplayDate } from '../utils/dates'
 import { getTotalTravellers } from '../types'
 import type {
@@ -48,6 +48,7 @@ import type {
   AccommodationType,
   TripActivity,
   ClimateType,
+  ResolvedLocation,
 } from '../types'
 import { useTripStore } from '../stores/tripStore'
 import {
@@ -63,6 +64,7 @@ import {
   isStep3Valid,
   isStep4Valid,
   isEntireWizardValid,
+  isSameCityJourney,
   compileTripConfig,
   saveWizardDraft,
   loadWizardDraft,
@@ -113,16 +115,32 @@ const CLIMATE_OPTIONS: { id: ClimateType; label: string; desc: string; icon: typ
   { id: 'unknown', label: 'Moderate / Unknown', desc: 'Balanced baseline essentials', icon: HelpCircle },
 ]
 
-export function TripWizardPage() {
+export interface TripWizardPageProps {
+  initialBasics?: WizardBasicsData
+  initialStep?: number
+  initialTravellers?: TravellerComposition
+  initialDetails?: WizardDetailsData
+  initialActivities?: WizardActivitiesData
+  initialPreferences?: WizardPreferencesData
+}
+
+export function TripWizardPage({
+  initialBasics,
+  initialStep,
+  initialTravellers,
+  initialDetails,
+  initialActivities,
+  initialPreferences,
+}: TripWizardPageProps = {}) {
   const navigate = useNavigate()
   const createTrip = useTripStore((state) => state.createTrip)
 
-  const [currentStep, setCurrentStep] = useState<number>(1)
-  const [basics, setBasics] = useState<WizardBasicsData>(INITIAL_BASICS)
-  const [travellers, setTravellers] = useState<TravellerComposition>(INITIAL_TRAVELLERS)
-  const [details, setDetails] = useState<WizardDetailsData>(INITIAL_DETAILS)
-  const [activitiesData, setActivitiesData] = useState<WizardActivitiesData>(INITIAL_ACTIVITIES)
-  const [preferences, setPreferences] = useState<WizardPreferencesData>(INITIAL_PREFERENCES)
+  const [currentStep, setCurrentStep] = useState<number>(() => initialStep ?? 1)
+  const [basics, setBasics] = useState<WizardBasicsData>(() => initialBasics ?? INITIAL_BASICS)
+  const [travellers, setTravellers] = useState<TravellerComposition>(() => initialTravellers ?? INITIAL_TRAVELLERS)
+  const [details, setDetails] = useState<WizardDetailsData>(() => initialDetails ?? INITIAL_DETAILS)
+  const [activitiesData, setActivitiesData] = useState<WizardActivitiesData>(() => initialActivities ?? INITIAL_ACTIVITIES)
+  const [preferences, setPreferences] = useState<WizardPreferencesData>(() => initialPreferences ?? INITIAL_PREFERENCES)
 
   // Draft restoration feedback
   const [draftRestored, setDraftRestored] = useState<boolean>(false)
@@ -135,7 +153,13 @@ export function TripWizardPage() {
   useEffect(() => {
     const draft = loadWizardDraft()
     if (draft) {
-      setBasics(draft.basics)
+      setBasics({
+        ...INITIAL_BASICS,
+        ...draft.basics,
+        origin: draft.basics.origin ?? '',
+        originLocation: draft.basics.originLocation,
+        destinationLocation: draft.basics.destinationLocation,
+      })
       setTravellers(draft.travellers)
       setDetails(draft.details)
       setActivitiesData(draft.activitiesData)
@@ -160,6 +184,12 @@ export function TripWizardPage() {
 
   // Step 1 Validation & Derived Values
   const step1Valid = isStep1Valid(basics)
+  const isSameCity = isSameCityJourney(
+    basics.origin,
+    basics.destination,
+    basics.originLocation,
+    basics.destinationLocation
+  )
   const dateValidation =
     basics.startDate && basics.endDate
       ? validateDateRange(basics.startDate, basics.endDate)
@@ -181,7 +211,63 @@ export function TripWizardPage() {
   const canGenerate = isEntireWizardValid(basics, travellers, details, activitiesData)
 
   const handleBasicsChange = (field: keyof WizardBasicsData, value: string) => {
-    setBasics((prev) => ({ ...prev, [field]: value }))
+    setBasics((prev) => {
+      const next = { ...prev, [field]: value }
+      if (field === 'origin') {
+        next.originLocation = undefined
+      } else if (field === 'destination') {
+        next.destinationLocation = undefined
+      }
+      return next
+    })
+  }
+
+  const handleOriginChange = (text: string) => {
+    setBasics((prev) => ({
+      ...prev,
+      origin: text,
+      originLocation: undefined,
+    }))
+  }
+
+  const handleOriginSelect = (loc: ResolvedLocation) => {
+    setBasics((prev) => ({
+      ...prev,
+      origin: formatCityLocation(loc),
+      originLocation: loc,
+    }))
+  }
+
+  const handleOriginClear = () => {
+    setBasics((prev) => ({
+      ...prev,
+      origin: '',
+      originLocation: undefined,
+    }))
+  }
+
+  const handleDestinationChange = (text: string) => {
+    setBasics((prev) => ({
+      ...prev,
+      destination: text,
+      destinationLocation: undefined,
+    }))
+  }
+
+  const handleDestinationSelect = (loc: ResolvedLocation) => {
+    setBasics((prev) => ({
+      ...prev,
+      destination: formatCityLocation(loc),
+      destinationLocation: loc,
+    }))
+  }
+
+  const handleDestinationClear = () => {
+    setBasics((prev) => ({
+      ...prev,
+      destination: '',
+      destinationLocation: undefined,
+    }))
   }
 
   const handleTravellerChange = (group: keyof TravellerComposition, delta: number) => {
@@ -485,28 +571,53 @@ export function TripWizardPage() {
               />
             </div>
 
-            {/* Destination Field */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="wizard-trip-destination"
-                className="block font-sans text-xs font-semibold text-ink-black"
-              >
-                Destination <span className="text-terracotta">*</span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-terracotta/70">
-                  <MapPin className="w-4 h-4" aria-hidden="true" />
+            {/* Origin & Destination Location Inputs */}
+            <div className="space-y-4">
+              {/* Origin City Field */}
+              <CityAutocompleteInput
+                id="wizard-trip-origin"
+                name="wizard-trip-origin"
+                label="Starting Point / Origin City"
+                required
+                placeholder="e.g. Mumbai, Maharashtra or London, UK"
+                value={basics.origin || ''}
+                selectedLocation={basics.originLocation || null}
+                onChange={handleOriginChange}
+                onSelect={handleOriginSelect}
+                onClear={handleOriginClear}
+                helperText="Departure city used for journey distance and environmental comparison."
+              />
+
+              {/* Destination City Field */}
+              <CityAutocompleteInput
+                id="wizard-trip-destination"
+                name="wizard-trip-destination"
+                label="Destination City"
+                required
+                placeholder="e.g. Interlaken, Switzerland or Kyoto, Japan"
+                value={basics.destination || ''}
+                selectedLocation={basics.destinationLocation || null}
+                onChange={handleDestinationChange}
+                onSelect={handleDestinationSelect}
+                onClear={handleDestinationClear}
+                helperText="Primary destination for weather forecasts, air quality, and packing needs."
+              />
+
+              {/* Same-City Informational Notice */}
+              {isSameCity && (
+                <div
+                  role="status"
+                  className="p-3 bg-sand/20 border border-sand/40 rounded-card flex items-start gap-2.5 text-xs font-sans text-ink-black/80"
+                >
+                  <Compass className="w-4 h-4 text-forest-green shrink-0 mt-0.5" aria-hidden="true" />
+                  <div className="space-y-0.5">
+                    <span className="font-semibold text-ink-black">Local Journey / Staycation</span>
+                    <p className="text-ink-black/70">
+                      Origin and destination are in the same city. PackPilot will optimize your packing list for local activities and conditions without intercity transit overhead.
+                    </p>
+                  </div>
                 </div>
-                <input
-                  id="wizard-trip-destination"
-                  type="text"
-                  required
-                  value={basics.destination}
-                  onChange={(e) => handleBasicsChange('destination', e.target.value)}
-                  placeholder="e.g. Interlaken, Switzerland or Kyoto, Japan"
-                  className="w-full pl-9 pr-3.5 py-2.5 bg-warm-white border border-sand/50 rounded-card font-sans text-sm text-ink-black placeholder:text-ink-black/40 focus:outline-none focus:ring-2 focus:ring-terracotta focus:border-transparent transition-all"
-                />
-              </div>
+              )}
             </div>
 
             {/* Travel Dates Grid */}
@@ -1410,18 +1521,41 @@ export function TripWizardPage() {
             <div className="space-y-4 text-xs font-sans">
               {/* Section 1: Fundamentals */}
               <div className="p-3 bg-warm-white/80 rounded-card border border-sand/30 flex items-start justify-between gap-3">
-                <div className="space-y-1">
+                <div className="space-y-1.5 min-w-0 flex-1">
                   <span className="font-bold text-ink-black uppercase text-[10px] tracking-wider text-sand-700 block">
                     1. Journey Fundamentals
                   </span>
-                  <p className="font-serif font-bold text-sm text-ink-black">
+                  <p className="font-serif font-bold text-sm text-ink-black truncate">
                     {basics.name || 'Untitled Trip'}
                   </p>
-                  <p className="flex items-center gap-1.5 text-ink-black/75">
-                    <MapPin className="w-3 h-3 text-terracotta shrink-0" />
-                    <span>{basics.destination || 'Unspecified Destination'}</span>
-                  </p>
-                  <p className="flex items-center gap-1.5 text-ink-black/60">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 text-ink-black/75 pt-0.5 flex-wrap">
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-semibold text-ink-black/50 uppercase tracking-wide">From:</span>
+                      <span className="font-medium text-ink-black">{basics.origin || 'Unspecified Origin'}</span>
+                      {basics.originLocation && (
+                        <Badge variant={basics.originLocation.coordinates ? 'forest' : 'sand'} size="sm">
+                          {basics.originLocation.coordinates ? 'Geocoded' : 'Custom'}
+                        </Badge>
+                      )}
+                    </span>
+                    <span className="hidden sm:inline text-sand">&rarr;</span>
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-semibold text-ink-black/50 uppercase tracking-wide">To:</span>
+                      <span className="font-medium text-ink-black">{basics.destination || 'Unspecified Destination'}</span>
+                      {basics.destinationLocation && (
+                        <Badge variant={basics.destinationLocation.coordinates ? 'forest' : 'sand'} size="sm">
+                          {basics.destinationLocation.coordinates ? 'Geocoded' : 'Custom'}
+                        </Badge>
+                      )}
+                    </span>
+                  </div>
+                  {isSameCity && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-sans text-forest-green bg-forest-green/10 px-2 py-0.5 rounded-full border border-forest-green/20">
+                      <Compass className="w-3 h-3 text-forest-green shrink-0" aria-hidden="true" />
+                      <span>Local journey (same city)</span>
+                    </span>
+                  )}
+                  <p className="flex items-center gap-1.5 text-ink-black/60 pt-0.5">
                     <Calendar className="w-3 h-3 text-sand shrink-0" />
                     <span>
                       {basics.startDate && basics.endDate
@@ -1438,7 +1572,7 @@ export function TripWizardPage() {
                   type="button"
                   onClick={() => setCurrentStep(1)}
                   leftIcon={<Edit2 className="w-3 h-3" />}
-                  className="text-xs text-ink-black/70 hover:text-ink-black"
+                  className="text-xs text-ink-black/70 hover:text-ink-black shrink-0"
                 >
                   Edit
                 </Button>

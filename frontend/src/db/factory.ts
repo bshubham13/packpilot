@@ -10,26 +10,29 @@ import { DexieTripsRepository } from './dexie/tripsRepository'
 import { DexieItemsRepository } from './dexie/itemsRepository'
 import { DexieTemplatesRepository } from './dexie/templatesRepository'
 import { DexieCacheRepository } from './dexie/cacheRepository'
+import { DexieBackupRepository } from './dexie/backupRepository'
 import { MemoryTripsRepository } from './memory/memoryTripsRepository'
 import { MemoryItemsRepository } from './memory/memoryItemsRepository'
 import { MemoryTemplatesRepository } from './memory/memoryTemplatesRepository'
 import { MemoryCacheRepository } from './memory/memoryCacheRepository'
+import { MemoryBackupRepository } from './memory/memoryBackupRepository'
 
 let currentContext: StorageContext | null = null
 let activeCreationPromise: Promise<StorageContext> | null = null
 let defaultMemoryFallback: StorageContext | null = null
 
 export async function createStorageContext(
-  forcedType?: StorageType
+  forcedType?: StorageType,
+  dexieDbName?: string
 ): Promise<StorageContext> {
   // If persistent IndexedDB storage has already been initialized and active,
   // do not silently downgrade to memory unless an explicit forcedType was requested.
-  if (!forcedType && currentContext?.storageType === 'indexeddb') {
+  if (!forcedType && !dexieDbName && currentContext?.storageType === 'indexeddb') {
     return currentContext
   }
 
   // Deduplicate concurrent initialization calls (e.g. React StrictMode concurrent mount)
-  if (!forcedType && activeCreationPromise) {
+  if (!forcedType && !dexieDbName && activeCreationPromise) {
     return activeCreationPromise
   }
 
@@ -48,7 +51,7 @@ export async function createStorageContext(
     if (useIndexedDB) {
       let db: PackPilotDatabase | null = null
       try {
-        db = getDexieDatabase()
+        db = getDexieDatabase(dexieDbName)
         // Verify actual database initialization and open connection
         await db.open()
 
@@ -57,6 +60,7 @@ export async function createStorageContext(
           items: new DexieItemsRepository(db),
           templates: new DexieTemplatesRepository(db),
           cache: new DexieCacheRepository(db),
+          backup: new DexieBackupRepository(db),
           isStorageAvailable: true,
           storageType: 'indexeddb',
         }
@@ -76,6 +80,7 @@ export async function createStorageContext(
       items: new MemoryItemsRepository(),
       templates: new MemoryTemplatesRepository(),
       cache: new MemoryCacheRepository(),
+      backup: new MemoryBackupRepository(),
       isStorageAvailable: false,
       storageType: 'memory',
     }
@@ -83,14 +88,14 @@ export async function createStorageContext(
     return memoryContext
   })()
 
-  if (!forcedType) {
+  if (!forcedType && !dexieDbName) {
     activeCreationPromise = creationPromise
   }
 
   try {
     return await creationPromise
   } finally {
-    if (!forcedType) {
+    if (!forcedType && !dexieDbName) {
       activeCreationPromise = null
     }
   }
@@ -105,6 +110,7 @@ export function getStorageContext(): StorageContext {
         items: new MemoryItemsRepository(),
         templates: new MemoryTemplatesRepository(),
         cache: new MemoryCacheRepository(),
+        backup: new MemoryBackupRepository(),
         isStorageAvailable: false,
         storageType: 'memory',
       }

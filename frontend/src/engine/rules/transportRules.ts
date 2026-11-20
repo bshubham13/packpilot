@@ -223,17 +223,6 @@ export function evaluateTransportRules(config: TripConfig): RecommendationCandid
         reasons: ['Conductor ticket inspection and platform turnstiles'],
       },
       {
-        itemSlug: 'wear-travel-blanket',
-        name: 'Compact Travel Wrap / Light Blanket',
-        category: 'clothing',
-        priority: 'optional',
-        quantityStrategy: 'per_person',
-        targetAgeGroup: 'all',
-        weightGrams: getReferenceWeight('wear-travel-blanket'),
-        isShared: false,
-        reasons: ['Chilly air-conditioned train carriages and overnight sleepers'],
-      },
-      {
         itemSlug: 'misc-reading-book',
         name: 'Paperback Book / E-Reader',
         category: 'miscellaneous',
@@ -245,6 +234,21 @@ export function evaluateTransportRules(config: TripConfig): RecommendationCandid
         reasons: ['Offline entertainment during rail journeys'],
       }
     )
+
+    // Preserve justified overnight blanket recommendation only when overnight transit is explicitly chosen
+    if (config.overnightSelection === 'yes') {
+      candidates.push({
+        itemSlug: 'wear-travel-blanket',
+        name: 'Compact Travel Wrap / Light Blanket',
+        category: 'clothing',
+        priority: 'optional',
+        quantityStrategy: 'per_person',
+        targetAgeGroup: 'all',
+        weightGrams: getReferenceWeight('wear-travel-blanket'),
+        isShared: false,
+        reasons: ['Chilly air-conditioned train carriages and overnight sleepers'],
+      })
+    }
   }
 
   return candidates

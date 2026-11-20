@@ -187,10 +187,21 @@ export function resolveOvernightTransit(
 }
 
 /**
- * Guardrail 1: Explicitly adapts legacy TransportMode[] to the new primary transport model
+ * Guardrail 1: Explicitly adapts legacy TransportMode[] to the primary transit model
  * without silently losing any selections.
+ *
+ * Domain semantics:
+ * 1. primaryTransport: The dominant intercity transit spine governing luggage limits and travel duration.
+ *    Precedence: flight > train > bus > car > bike > other.
+ * 2. secondaryTransportModes: All other modes selected by the user for multi-leg or mixed journeys.
+ * 3. destinationMobility: Explicit local mobility preferences at the destination (e.g. car rental or public transit).
+ *    We do NOT assume secondary intercity transport automatically implies destination mobility.
+ *    Preserves explicit true, explicit false, and undefined (tri-state semantics).
  */
-export function adaptTransportModes(modes: TransportMode[] = []): {
+export function adaptTransportModes(
+  modes: TransportMode[] = [],
+  explicitMobility?: Partial<DestinationMobility>
+): {
   primaryTransport: TransportMode
   destinationMobility: DestinationMobility
   secondaryTransportModes: TransportMode[]
@@ -210,23 +221,18 @@ export function adaptTransportModes(modes: TransportMode[] = []): {
 
   const secondaryTransportModes = safeModes.filter((m) => m !== primaryTransport)
 
-  // Derive destination mobility without dropping secondary modes
-  const isDrivingAtDestination =
-    safeModes.includes('car') || safeModes.includes('bike')
-      ? primaryTransport !== 'car' && primaryTransport !== 'bike'
-      : false
-
-  const isPublicTransitFocused =
-    safeModes.includes('bus') || safeModes.includes('train')
-      ? primaryTransport !== 'bus' && primaryTransport !== 'train'
-      : false
+  // Destination mobility is an explicit local preference at the destination.
+  // In legacy trips or when only transportModes are provided, we do NOT assume
+  // secondary intercity transport automatically implies destination mobility.
+  // Preserves explicit true, explicit false, and undefined (tri-state semantics).
+  const destinationMobility: DestinationMobility = {
+    isDrivingAtDestination: explicitMobility?.isDrivingAtDestination,
+    isPublicTransitFocused: explicitMobility?.isPublicTransitFocused,
+  }
 
   return {
     primaryTransport,
-    destinationMobility: {
-      isDrivingAtDestination,
-      isPublicTransitFocused,
-    },
+    destinationMobility,
     secondaryTransportModes,
   }
 }

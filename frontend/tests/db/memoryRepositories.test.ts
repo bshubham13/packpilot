@@ -79,6 +79,122 @@ describe('In-Memory Fallback Repositories', () => {
     expect(allTrips).toHaveLength(1)
   })
 
+  it('atomically updates trip and replaces items in memory isolating from other trips', async () => {
+    await tripsRepo.saveTripWithItems(createSampleTrip('trip-1'), [
+      createSampleItem('item-1', 'trip-1', 'wear-socks'),
+    ])
+    await tripsRepo.saveTripWithItems(createSampleTrip('trip-2'), [
+      createSampleItem('item-2', 'trip-2', 'wear-hat'),
+    ])
+
+    const newItems = [createSampleItem('item-3', 'trip-1', 'wear-jacket')]
+    await tripsRepo.atomicUpdateTripAndItems(
+      'trip-1',
+      { name: 'Tokyo Autumn Trip', durationDays: 10 },
+      newItems
+    )
+
+    // Trip 1 updated
+    const trip1 = await tripsRepo.getTripById('trip-1')
+    expect(trip1?.name).toBe('Tokyo Autumn Trip')
+    expect(trip1?.durationDays).toBe(10)
+
+    const trip1Items = await itemsRepo.getItemsForTrip('trip-1')
+    expect(trip1Items).toHaveLength(1)
+    expect(trip1Items[0].itemSlug).toBe('wear-jacket')
+
+    // Trip 2 untouched
+    const trip2Items = await itemsRepo.getItemsForTrip('trip-2')
+    expect(trip2Items).toHaveLength(1)
+    expect(trip2Items[0].itemSlug).toBe('wear-hat')
+  })
+
+  it('rolls back memory trip and item mutations if an error occurs during atomic update', async () => {
+    await tripsRepo.saveTripWithItems(createSampleTrip('trip-1'), [
+      createSampleItem('item-1', 'trip-1', 'wear-socks'),
+    ])
+
+    // Invalid item with mismatching tripId triggers validation failure
+    const invalidItems = [
+      createSampleItem('item-2', 'wrong-trip-id', 'wear-boots'),
+    ]
+
+    await expect(
+      tripsRepo.atomicUpdateTripAndItems('trip-1', { name: 'Failed Trip Update' }, invalidItems)
+    ).rejects.toThrow('Invalid item for atomic update on trip: trip-1')
+
+    // Trip was not modified
+    const trip = await tripsRepo.getTripById('trip-1')
+    expect(trip?.name).toBe('Tokyo Metro Trip')
+
+    // Original items were preserved
+    const items = await itemsRepo.getItemsForTrip('trip-1')
+    expect(items).toHaveLength(1)
+    expect(items[0].itemSlug).toBe('wear-socks')
+  })
+
+  it('rolls back in-memory trip mutations and restores items when an error occurs during item insertion', async () => {
+    await tripsRepo.saveTripWithItems(createSampleTrip('trip-1'), [
+      createSampleItem('item-1', 'trip-1', 'wear-socks'),
+    ])
+    await tripsRepo.saveTripWithItems(createSampleTrip('trip-2'), [
+      createSampleItem('item-2', 'trip-2', 'wear-hat'),
+    ])
+
+    // Spy/intercept state.items.set to simulate a failure during item insertion after trip update
+    const originalSet = state.items.set.bind(state.items)
+    state.items.set = ((key: string, value: PackingItem) => {
+      if (key === 'item-failing') {
+        throw new Error('Simulated memory insertion failure')
+      }
+      return originalSet(key, value)
+    }) as unknown as typeof state.items.set
+
+    const newItems = [
+      createSampleItem('item-inserted-first', 'trip-1', 'wear-boots'),
+      createSampleItem('item-failing', 'trip-1', 'wear-jacket'),
+    ]
+
+    await expect(
+      tripsRepo.atomicUpdateTripAndItems(
+        'trip-1',
+        {
+          name: 'Mutated Trip That Must Rollback',
+          dismissedItems: ['dismissed-during-mutation'],
+        },
+        newItems
+      )
+    ).rejects.toThrow('Simulated memory insertion failure')
+
+    // Restore original set implementation
+    state.items.set = originalSet
+
+    // 1. Verify trip-1 was restored to original snapshot (including nested fields)
+    const trip1 = await tripsRepo.getTripById('trip-1')
+    expect(trip1?.name).toBe('Tokyo Metro Trip')
+    expect(trip1?.dismissedItems).toEqual([])
+
+    // 2. Verify trip-1 original items were restored and partially inserted items removed
+    const trip1Items = await itemsRepo.getItemsForTrip('trip-1')
+    expect(trip1Items).toHaveLength(1)
+    expect(trip1Items[0].id).toBe('item-1')
+    expect(trip1Items[0].itemSlug).toBe('wear-socks')
+
+    // 3. Verify sibling trip-2 and its items remain completely unaffected
+    const trip2 = await tripsRepo.getTripById('trip-2')
+    expect(trip2?.name).toBe('Tokyo Metro Trip')
+    const trip2Items = await itemsRepo.getItemsForTrip('trip-2')
+    expect(trip2Items).toHaveLength(1)
+    expect(trip2Items[0].id).toBe('item-2')
+    expect(trip2Items[0].itemSlug).toBe('wear-hat')
+  })
+
+  it('throws when atomicUpdateTripAndItems is called on a non-existent trip in memory', async () => {
+    await expect(
+      tripsRepo.atomicUpdateTripAndItems('non-existent', { name: 'Ghost' }, [])
+    ).rejects.toThrow('Trip not found: non-existent')
+  })
+
   it('cascades deletion of trips to child items in memory without leaving orphaned records', async () => {
     await tripsRepo.saveTripWithItems(createSampleTrip('trip-1'), [
       createSampleItem('item-1', 'trip-1'),

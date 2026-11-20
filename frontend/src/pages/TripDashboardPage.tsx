@@ -13,9 +13,11 @@ import {
   AlertTriangle,
   Loader2,
   CheckCircle2,
+  HardDriveDownload,
 } from 'lucide-react'
 import { useTripStore } from '../stores/tripStore'
 import { Card, Button, Badge, Modal } from '../components/ui'
+import { BackupRestoreModal } from '../components/backup'
 import { formatDisplayDate } from '../utils/dates'
 import { calculateReadinessScore } from '../utils/scoring'
 import { getStorageContext } from '../db/factory'
@@ -42,6 +44,8 @@ export function TripDashboardPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Trip | null>(null)
   const [isDeleting, setIsDeleting] = useState<boolean>(false)
+
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false)
 
   // Ensure trips are fresh when visiting the dashboard
   useEffect(() => {
@@ -150,15 +154,26 @@ export function TripDashboardPage() {
           </p>
         </div>
 
-        <Link to="/wizard/new" className="w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
           <Button
-            variant="primary"
-            leftIcon={<Plus className="w-4 h-4" aria-hidden="true" />}
-            className="w-full sm:w-auto text-xs sm:text-sm"
+            variant="secondary"
+            onClick={() => setIsBackupModalOpen(true)}
+            leftIcon={<HardDriveDownload className="w-4 h-4" aria-hidden="true" />}
+            className="w-full sm:w-auto text-xs sm:text-sm font-medium"
+            data-testid="dashboard-backup-btn"
           >
-            Plan a New Trip
+            Backup &amp; Restore
           </Button>
-        </Link>
+          <Link to="/wizard/new" className="w-full sm:w-auto">
+            <Button
+              variant="primary"
+              leftIcon={<Plus className="w-4 h-4" aria-hidden="true" />}
+              className="w-full sm:w-auto text-xs sm:text-sm font-medium"
+            >
+              Plan a New Trip
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Global Error Banner */}
@@ -487,6 +502,12 @@ export function TripDashboardPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Backup & Restore Modal */}
+      <BackupRestoreModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+      />
     </div>
   )
 }

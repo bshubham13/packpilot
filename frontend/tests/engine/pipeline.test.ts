@@ -5,7 +5,7 @@ import {
   dismissItem,
 } from '../../src/engine'
 import { calculateReadinessScore } from '../../src/utils/scoring'
-import type { TripConfig, PackingItem } from '../../src/types'
+import type { TripConfig, PackingItem, NormalizedTripContext } from '../../src/types'
 
 function createSampleTrip(overrides: Partial<TripConfig> = {}): TripConfig {
   return {
@@ -310,6 +310,263 @@ describe('Recommendation Orchestration Pipeline (src/engine/index.ts)', () => {
       // Fixed items (like roadside kit or universal adapter) are preserved
       const fixedItems = result.items.filter((i) => i.quantityStrategy === 'fixed')
       expect(fixedItems.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  describe('Journey Intelligence Pipeline Integration (Milestone 7.2B-2A)', () => {
+    const intercityContext: NormalizedTripContext = {
+      contextVersion: '2.0.0',
+      contextState: 'current',
+      tripId: 'trip-intercity-1',
+      name: 'Delhi Conference',
+      startDate: '2026-10-10',
+      endDate: '2026-10-14',
+      durationDays: 5,
+      travellers: { adults: 2, teens: 0, children: 0, infants: 0, seniors: 0 },
+      hasLaundryAccess: false,
+      activities: ['sightseeing'],
+      personalPreferences: [],
+      baggageConfig: { hasCabinBaggage: true, cabinWeightLimitKg: 7, hasCheckedBaggage: false, checkedWeightLimitKg: 23 },
+      legacyClimateEnum: 'mixed',
+      journey: {
+        origin: {
+          city: { id: 'pune_in', name: 'Pune', country: 'India', countryCode: 'IN' },
+          coordinates: { latitude: 18.5204, longitude: 73.8567, isCentroid: true },
+        },
+        destination: {
+          city: { id: 'delhi_in', name: 'Delhi', country: 'India', countryCode: 'IN' },
+          coordinates: { latitude: 28.6139, longitude: 77.209, isCentroid: true },
+        },
+        straightLineDistanceKm: 1173.0,
+        isHeuristicDistance: true,
+        classification: 'intercity',
+        durationRangeHours: { min: 24.0, max: 28.0, method: 'speed_envelope_heuristic' },
+        overnightSelection: 'auto',
+        isOvernightTransit: true,
+        isOvernightResolved: true,
+        primaryTransport: 'train',
+        secondaryTransportModes: [],
+        destinationMobility: { isDrivingAtDestination: true },
+        provenance: { distanceMethod: 'haversine', retrievalMethod: 'offline_fallback', availability: 'available' },
+      },
+      environment: {
+        daily: [],
+        summary: {},
+        hasFullForecastCoverage: false,
+        hasPartialForecastCoverage: false,
+        contextProvenance: { provider: 'none', retrievalMethod: 'offline_fallback', source: 'none', availability: 'unresolved_location', confidence: 'unavailable' },
+        attribution: 'Open-Meteo.com',
+      },
+      contextGeneratedAt: '2026-10-01T00:00:00Z',
+    }
+
+    it('1. generates eligible journey recommendations for intercity journey with supplied normalized context', () => {
+      const trip = createSampleTrip({
+        transportModes: ['train'],
+        startDate: '2026-10-10',
+        endDate: '2026-10-14',
+      })
+
+      const result = generateRecommendations(trip, {
+        normalizedContext: intercityContext,
+      })
+
+      const slugs = result.items.map((i) => i.itemSlug)
+      // Confirmed overnight ground transit
+      expect(slugs).toContain('wear-dorm-earplugs')
+      expect(slugs).toContain('wear-travel-blanket')
+      expect(slugs).toContain('wear-neck-pillow')
+      // Intercity hydration & duration items
+      expect(slugs).toContain('gear-reusable-bottle')
+      expect(slugs).toContain('misc-transit-snacks')
+      // Destination mobility items (isDrivingAtDestination === true)
+      expect(slugs).toContain('doc-driver-licence')
+      expect(slugs).toContain('elec-car-mount')
+    })
+
+    it('2. does not generate distance-dependent recommendations for local journey', () => {
+      const localContext: NormalizedTripContext = {
+        ...intercityContext,
+        journey: {
+          ...intercityContext.journey,
+          straightLineDistanceKm: 25.0,
+          classification: 'local',
+          durationRangeHours: { min: 0.5, max: 1.0, method: 'speed_envelope_heuristic' },
+          isOvernightTransit: false,
+          isOvernightResolved: true,
+          destinationMobility: {},
+        },
+      }
+
+      const trip = createSampleTrip({ transportModes: ['car'] })
+      const result = generateRecommendations(trip, { normalizedContext: localContext })
+      const slugs = result.items.map((i) => i.itemSlug)
+
+      // Suppressed for local trips
+      expect(slugs).not.toContain('gear-reusable-bottle')
+      expect(slugs).not.toContain('misc-transit-snacks')
+      expect(slugs).not.toContain('wear-neck-pillow')
+      expect(slugs).not.toContain('wear-dorm-earplugs')
+      expect(slugs).not.toContain('wear-travel-blanket')
+    })
+
+    it('3. suppresses distance-dependent recommendations when origin is unknown', () => {
+      const tripWithoutOrigin = createSampleTrip({
+        origin: undefined,
+        originLocation: undefined,
+      })
+
+      // Evaluated without supplied context; fallback triggers with unknown classification
+      const result = generateRecommendations(tripWithoutOrigin)
+      const slugs = result.items.map((i) => i.itemSlug)
+
+      expect(slugs).not.toContain('gear-reusable-bottle')
+      expect(slugs).not.toContain('misc-transit-snacks')
+      expect(slugs).not.toContain('wear-neck-pillow')
+    })
+
+    it('4. legacy trip without normalized context remains fully functional', () => {
+      const legacyTrip: TripConfig = {
+        name: 'Legacy 1.0 Trip',
+        destination: 'Goa',
+        startDate: '2026-11-01',
+        endDate: '2026-11-05',
+        transportModes: ['flight'],
+        activities: ['beach'],
+        climate: 'warm',
+        travellers: { adults: 2, teens: 0, children: 0, infants: 0, seniors: 0 },
+      }
+
+      const result = generateRecommendations(legacyTrip)
+      expect(result.durationDays).toBe(5)
+      expect(result.items.length).toBeGreaterThan(10)
+
+      const slugs = result.items.map((i) => i.itemSlug)
+      // Standard legacy items present
+      expect(slugs).toContain('doc-id-card')
+      expect(slugs).toContain('doc-passport')
+      expect(slugs).toContain('wear-swimwear')
+      expect(slugs).toContain('toil-sunscreen-spf50')
+
+      // Zero distance items fabricated
+      expect(slugs).not.toContain('gear-reusable-bottle')
+      expect(slugs).not.toContain('misc-transit-snacks')
+    })
+
+    it('5. preserves existing climate and transport recommendations intact', () => {
+      const coldTrip = createSampleTrip({
+        climate: 'cold',
+        transportModes: ['bike'],
+      })
+
+      const result = generateRecommendations(coldTrip)
+      const slugs = result.items.map((i) => i.itemSlug)
+
+      // Climate rules intact
+      expect(slugs).toContain('wear-thermal-layers')
+      expect(slugs).toContain('wear-winter-jacket')
+      // Transport rules intact
+      expect(slugs).toContain('gear-moto-helmet')
+      expect(slugs).toContain('wear-moto-jacket')
+    })
+
+    it('6. shared slugs deduplicate and merge reasons correctly across rules', () => {
+      // Overnight hostel trip: accommodationRules emits wear-dorm-earplugs, journeyRules also emits wear-dorm-earplugs
+      const hostelContext: NormalizedTripContext = {
+        ...intercityContext,
+        accommodationType: 'hostel',
+      }
+
+      const hostelTrip = createSampleTrip({
+        accommodationType: 'hostel',
+        transportModes: ['train'],
+      })
+
+      const result = generateRecommendations(hostelTrip, { normalizedContext: hostelContext })
+      const earplugItems = result.items.filter((i) => i.itemSlug === 'wear-dorm-earplugs')
+
+      // Deduplication guarantees exactly ONE physical item
+      expect(earplugItems).toHaveLength(1)
+      // Reasons from both accommodation (dormitory noise) and journey (overnight transit) are merged
+      expect(earplugItems[0].reasons.length).toBeGreaterThanOrEqual(2)
+      expect(earplugItems[0].reasons.some((r) => r.includes('dormitories'))).toBe(true)
+      expect(earplugItems[0].reasons.some((r) => r.includes('overnight transit'))).toBe(true)
+    })
+
+    it('7. preserves user-adjusted quantities, packed state, dismissed snapshots, and custom items during reconciliation', () => {
+      const trip = createSampleTrip({ transportModes: ['train'] })
+      const initial = generateRecommendations(trip, { normalizedContext: intercityContext })
+
+      // User custom item
+      const customItem: PackingItem = {
+        id: 'custom-item-1',
+        tripId: 'trip-intercity-1',
+        name: 'Personal Travel Journal',
+        itemSlug: 'custom-journal',
+        category: 'miscellaneous',
+        priority: 'optional',
+        quantityStrategy: 'user_defined',
+        generatedQuantity: 1,
+        effectiveQuantity: 1,
+        packedQuantity: 1,
+        isPacked: true,
+        isCustom: true,
+        isShared: false,
+        reasons: ['User entry'],
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+      }
+
+      // User adjusts quantity of reusable bottle to 3 and packs 2
+      const modifiedList: PackingItem[] = [
+        ...initial.items.map((item) => {
+          if (item.itemSlug === 'gear-reusable-bottle') {
+            return {
+              ...item,
+              userAdjustedQuantity: 3,
+              effectiveQuantity: 3,
+              packedQuantity: 2,
+              isPacked: false,
+            }
+          }
+          return item
+        }),
+        customItem,
+      ]
+
+      // User dismisses wear-neck-pillow
+      const { updatedChecklist, dismissedRecord } = dismissItem(modifiedList, 'wear-neck-pillow')
+
+      // Re-run pipeline (simulating checklist regeneration)
+      const reconciled = generateRecommendations(trip, {
+        existingItems: updatedChecklist,
+        dismissedRecords: [dismissedRecord!],
+        normalizedContext: intercityContext,
+      })
+
+      // Custom item preserved
+      const journal = reconciled.items.find((i) => i.itemSlug === 'custom-journal')
+      expect(journal).toBeDefined()
+      expect(journal?.isCustom).toBe(true)
+      expect(journal?.isPacked).toBe(true)
+
+      // User-adjusted quantity & packed progress preserved
+      const bottle = reconciled.items.find((i) => i.itemSlug === 'gear-reusable-bottle')
+      expect(bottle?.userAdjustedQuantity).toBe(3)
+      expect(bottle?.effectiveQuantity).toBe(3)
+      expect(bottle?.packedQuantity).toBe(2)
+
+      // Dismissed neck pillow is NOT resurrected
+      expect(reconciled.items.some((i) => i.itemSlug === 'wear-neck-pillow')).toBe(false)
+    })
+
+    it('8. repeated identical inputs produce strictly deterministic results', () => {
+      const trip = createSampleTrip({ transportModes: ['train'] })
+      const fixedNow = '2026-10-01T00:00:00.000Z'
+      const run1 = generateRecommendations(trip, { normalizedContext: intercityContext, now: fixedNow })
+      const run2 = generateRecommendations(trip, { normalizedContext: intercityContext, now: fixedNow })
+
+      expect(run1.items).toEqual(run2.items)
     })
   })
 })

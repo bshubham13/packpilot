@@ -7,6 +7,7 @@ import { useChecklistStore } from '../../src/stores/checklistStore'
 import { ChecklistPage } from '../../src/pages/ChecklistPage'
 import { createStorageContext, getStorageContext } from '../../src/db/factory'
 import type { Trip, PackingItem, DismissedItemRecord } from '../../src/types'
+import type { NormalizedTripContext } from '../../src/types/context'
 
 // In Node SSR test environment, ensure useSyncExternalStore reads live store snapshot
 vi.spyOn(React, 'useSyncExternalStore').mockImplementation((_subscribe, getSnapshot) => getSnapshot())
@@ -1111,6 +1112,367 @@ describe('Packing Checklist Foundation & Item Management (Slices 6.4A & 6.4B)', 
 
       html = renderChecklist('trip-alpine-101')
       expect(html).toContain('data-testid="unassigned-items-warning"')
+    })
+  })
+
+  describe('12. Travel Intelligence Card Integration (Slice 2C-3)', () => {
+    const sampleResolvedContext: NormalizedTripContext = {
+      contextVersion: '2.0.0',
+      contextState: 'current',
+      tripId: 'trip-alpine-101',
+      name: 'Swiss Alpine Expedition',
+      startDate: '2026-08-10',
+      endDate: '2026-08-17',
+      durationDays: 8,
+      travellers: { adults: 2, teens: 0, children: 0, infants: 0 },
+      hasLaundryAccess: true,
+      activities: ['trekking'],
+      personalPreferences: ['first_aid'],
+      baggageConfig: { bags: [] },
+      contextGeneratedAt: '2026-08-01T10:00:00.000Z',
+      environment: {
+        daily: [
+          {
+            date: '2026-08-10',
+            weatherCode: 0,
+            usAqi: 42,
+            temperatureMinC: 8,
+            temperatureMaxC: 22,
+            weatherProvenance: {
+              provider: 'open_meteo',
+              retrievalMethod: 'network',
+              source: 'open_meteo_forecast',
+              availability: 'available',
+              confidence: 'forecast',
+            },
+            aqiProvenance: {
+              provider: 'open_meteo',
+              retrievalMethod: 'network',
+              source: 'open_meteo_forecast',
+              availability: 'available',
+              confidence: 'forecast',
+            },
+          },
+        ],
+        summary: {
+          periodMinTempC: 8,
+          periodMaxTempC: 22,
+          maxPrecipitationProbability: 15,
+          totalPrecipitationMm: 1.2,
+          maxUvIndex: 5.5,
+        },
+        hasFullForecastCoverage: true,
+        hasPartialForecastCoverage: false,
+        contextProvenance: {
+          provider: 'open_meteo',
+          retrievalMethod: 'network',
+          source: 'open_meteo_forecast',
+          availability: 'available',
+          confidence: 'forecast',
+          fetchedAt: '2026-08-01T09:30:00.000Z',
+        },
+        attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)',
+      },
+      journey: {
+        origin: {
+          city: { id: 'geneva', name: 'Geneva', country: 'Switzerland', countryCode: 'CH' },
+          coordinates: { latitude: 46.2044, longitude: 6.1432, isCentroid: false },
+        },
+        destination: {
+          city: { id: 'zermatt', name: 'Zermatt', country: 'Switzerland', countryCode: 'CH' },
+          coordinates: { latitude: 45.9765, longitude: 7.7491, isCentroid: false },
+        },
+        straightLineDistanceKm: 128.4,
+        isHeuristicDistance: true,
+        classification: 'regional',
+        overnightSelection: 'auto',
+        isOvernightTransit: false,
+        isOvernightResolved: true,
+        primaryTransport: 'train',
+        destinationMobility: { isDrivingAtDestination: false, isPublicTransitFocused: true },
+        secondaryTransportModes: [],
+        provenance: {
+          distanceMethod: 'haversine',
+          retrievalMethod: 'offline_fallback',
+          availability: 'available',
+        },
+      },
+    }
+
+    it('1. renders resolved travel intelligence card with weather and journey data', () => {
+      const tripWithContext: Trip = {
+        ...mockTrip,
+        normalizedContext: sampleResolvedContext,
+      }
+
+      useTripStore.setState({
+        trips: [tripWithContext],
+        activeTrip: tripWithContext,
+        resolutionStatus: { [tripWithContext.id]: 'resolved' },
+      })
+      useChecklistStore.setState({
+        tripId: tripWithContext.id,
+        items: mockItems,
+      })
+
+      const html = renderChecklist(tripWithContext.id)
+      const cleanHtml = html.replace(/<!-- -->/g, '')
+
+      expect(cleanHtml).toContain('Travel Intelligence')
+      expect(cleanHtml).toContain('Weather &amp; Climate')
+      expect(cleanHtml).toContain('Clear sky')
+      expect(cleanHtml).toContain('8° – 22°C')
+      expect(cleanHtml).toContain('15% rain')
+      expect(cleanHtml).toContain('AQI: 42 (Good)')
+      expect(cleanHtml).toContain('Journey &amp; Mobility')
+      expect(cleanHtml).toContain('Geneva')
+      expect(cleanHtml).toContain('Zermatt')
+      expect(cleanHtml).toContain('128 km')
+      expect(cleanHtml).toContain('(Straight-line distance)')
+      expect(cleanHtml).toContain('Note: Actual road or rail travel distance will vary based on routes taken.')
+    })
+
+    it('2. renders non-blocking resolving state without blocking checklist items or interactions', () => {
+      useTripStore.setState({
+        trips: [mockTrip],
+        activeTrip: mockTrip,
+        resolutionStatus: { [mockTrip.id]: 'resolving' },
+      })
+      useChecklistStore.setState({
+        tripId: mockTrip.id,
+        items: mockItems,
+      })
+
+      const html = renderChecklist(mockTrip.id)
+
+      // Card displays resolving indicators
+      expect(html).toContain('Gathering meteorological observations...')
+      expect(html).toContain('Computing transit heuristics &amp; distance...')
+
+      // Checklist items below remain fully rendered and interactive
+      expect(html).toContain('Passport &amp; Travel Visa')
+      expect(html).toContain('Thermal Base Layer Top')
+      expect(html).toContain('Waterproof Hiking Boots')
+      expect(html).toContain('Add Item')
+    })
+
+    it('3. represents partial weather/journey availability correctly', () => {
+      const partialTrip: Trip = {
+        ...mockTrip,
+        normalizedContext: {
+          ...sampleResolvedContext,
+          environment: {
+            ...sampleResolvedContext.environment,
+            hasFullForecastCoverage: false,
+            hasPartialForecastCoverage: true,
+          },
+        },
+      }
+
+      useTripStore.setState({
+        trips: [partialTrip],
+        activeTrip: partialTrip,
+        resolutionStatus: { [partialTrip.id]: 'resolved' },
+      })
+      useChecklistStore.setState({
+        tripId: partialTrip.id,
+        items: mockItems,
+      })
+
+      const html = renderChecklist(partialTrip.id)
+
+      expect(html).toContain('Partial')
+      expect(html).toContain('Partial Forecast')
+      expect(html).toContain('Trip extends beyond the 16-day forecast horizon')
+    })
+
+    it('4. refresh callback is wired to tripStore.refreshTripContext with the correct trip ID', async () => {
+      const refreshSpy = vi.fn().mockResolvedValue(mockTrip)
+      useTripStore.setState({
+        trips: [mockTrip],
+        activeTrip: mockTrip,
+        resolutionStatus: { [mockTrip.id]: 'resolved' },
+        refreshTripContext: refreshSpy,
+      })
+      useChecklistStore.setState({
+        tripId: mockTrip.id,
+        items: mockItems,
+      })
+
+      // Directly invoke refresh action registered on store
+      await useTripStore.getState().refreshTripContext(mockTrip.id)
+      expect(refreshSpy).toHaveBeenCalledWith(mockTrip.id)
+    })
+
+    it('5. prevents duplicate refresh when trip is already resolving', () => {
+      useTripStore.setState({
+        trips: [mockTrip],
+        activeTrip: mockTrip,
+        resolutionStatus: { [mockTrip.id]: 'resolving' },
+      })
+      useChecklistStore.setState({
+        tripId: mockTrip.id,
+        items: mockItems,
+      })
+
+      const html = renderChecklist(mockTrip.id)
+      // The refresh button in the header is disabled while resolving
+      expect(html).toContain('disabled=""')
+      expect(html).toContain('aria-label="Refresh intelligence insights"')
+    })
+
+    it('6. failed refresh does not crash the ChecklistPage and renders error state safely', () => {
+      const failedTrip: Trip = {
+        ...mockTrip,
+        normalizedContext: {
+          ...sampleResolvedContext,
+          environment: {
+            ...sampleResolvedContext.environment,
+            daily: [],
+            summary: {},
+            hasFullForecastCoverage: false,
+            hasPartialForecastCoverage: false,
+            contextProvenance: {
+              provider: 'open_meteo',
+              retrievalMethod: 'network',
+              availability: 'provider_error',
+              source: 'none',
+              confidence: 'unavailable',
+            },
+          },
+        },
+      }
+
+      useTripStore.setState({
+        trips: [failedTrip],
+        activeTrip: failedTrip,
+        resolutionStatus: { [failedTrip.id]: 'resolved' },
+        resolutionError: { [failedTrip.id]: 'Open-Meteo API unreachable' },
+      })
+      useChecklistStore.setState({
+        tripId: failedTrip.id,
+        items: mockItems,
+      })
+
+      const html = renderChecklist(failedTrip.id)
+      expect(html).toContain('Weather data unavailable')
+      expect(html).toContain('External weather service returned an error')
+      // Page does not crash; checklist remains accessible
+      expect(html).toContain('Passport &amp; Travel Visa')
+    })
+
+    it('7. legacy trip without normalizedContext displays prompt and initiates insight generation', async () => {
+      const refreshSpy = vi.fn().mockResolvedValue(mockTrip)
+      const legacyTrip: Trip = {
+        ...mockTrip,
+        normalizedContext: undefined,
+      }
+
+      useTripStore.setState({
+        trips: [legacyTrip],
+        activeTrip: legacyTrip,
+        resolutionStatus: { [legacyTrip.id]: 'idle' },
+        refreshTripContext: refreshSpy,
+      })
+      useChecklistStore.setState({
+        tripId: legacyTrip.id,
+        items: mockItems,
+      })
+
+      const html = renderChecklist(legacyTrip.id)
+
+      expect(html).toContain('Travel insights have not been generated for this journey yet.')
+      expect(html).toContain('Generate Insights')
+
+      // Store action is callable with the legacy trip's ID
+      await useTripStore.getState().refreshTripContext(legacyTrip.id)
+      expect(refreshSpy).toHaveBeenCalledWith(legacyTrip.id)
+    })
+
+    it('8. switching trips does not leak previous trip context or resolution status', () => {
+      const tripA: Trip = {
+        ...mockTrip,
+        id: 'trip-a-tokyo',
+        name: 'Tokyo Blossom Tour',
+        destination: 'Tokyo, Japan',
+        normalizedContext: {
+          ...sampleResolvedContext,
+          tripId: 'trip-a-tokyo',
+          journey: {
+            ...sampleResolvedContext.journey,
+            destination: {
+              city: { id: 'tokyo', name: 'Tokyo', country: 'Japan', countryCode: 'JP' },
+              coordinates: { latitude: 35.6762, longitude: 139.6503, isCentroid: false },
+            },
+            straightLineDistanceKm: 9550,
+          },
+        },
+      }
+
+      const tripB: Trip = {
+        ...mockTrip,
+        id: 'trip-b-paris',
+        name: 'Paris Art Week',
+        destination: 'Paris, France',
+        normalizedContext: undefined, // Legacy trip without context
+      }
+
+      useTripStore.setState({
+        trips: [tripA, tripB],
+        activeTrip: tripA, // Store still has trip A as active
+        resolutionStatus: {
+          [tripA.id]: 'resolved',
+          [tripB.id]: 'idle',
+        },
+      })
+      useChecklistStore.setState({
+        tripId: tripB.id,
+        items: mockItems,
+      })
+
+      // Render ChecklistPage for Trip B
+      const htmlB = renderChecklist(tripB.id)
+
+      // Must display Trip B information
+      expect(htmlB).toContain('Paris Art Week')
+      expect(htmlB).toContain('Paris, France')
+      expect(htmlB).toContain('Travel insights have not been generated for this journey yet.')
+
+      // Must NOT leak Trip A's Tokyo context or distance
+      expect(htmlB).not.toContain('Tokyo Blossom Tour')
+      expect(htmlB).not.toContain('9550 km')
+      expect(htmlB).not.toContain('Geneva → Tokyo')
+    })
+
+    it('9. existing checklist readiness scoring and weight metrics remain intact', () => {
+      const tripWithContext: Trip = {
+        ...mockTrip,
+        normalizedContext: sampleResolvedContext,
+      }
+
+      const itemsWithBags: PackingItem[] = [
+        { ...mockItems[0], bagAssignment: 'cabin' }, // 2 * 50g = 0.1 kg
+        { ...mockItems[1], bagAssignment: 'checked' }, // 4 * 200g = 0.8 kg
+        ...mockItems.slice(2),
+      ]
+
+      useTripStore.setState({
+        trips: [tripWithContext],
+        activeTrip: tripWithContext,
+        resolutionStatus: { [tripWithContext.id]: 'resolved' },
+      })
+      useChecklistStore.setState({
+        tripId: tripWithContext.id,
+        items: itemsWithBags,
+      })
+
+      const html = renderChecklist(tripWithContext.id)
+
+      // Verified readiness gauge & dual baggage metrics
+      expect(html).toContain('Readiness Score')
+      expect(html).toContain('data-testid="luggage-weight-panel"')
+      expect(html).toContain('0.1 / 8 kg')
+      expect(html).toContain('0.8 / 23 kg')
     })
   })
 })

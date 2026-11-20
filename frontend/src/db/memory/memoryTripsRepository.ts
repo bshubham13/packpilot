@@ -46,6 +46,72 @@ export class MemoryTripsRepository implements ITripsRepository {
     })
   }
 
+  async atomicUpdateTripAndItems(
+    tripId: string,
+    tripUpdates: Partial<Trip>,
+    reconciledItems: PackingItem[]
+  ): Promise<void> {
+    const existing = this.state.trips.get(tripId)
+    if (!existing) {
+      throw new Error(`Trip not found: ${tripId}`)
+    }
+
+    // Validate reconciledItems to prevent corrupted state
+    if (reconciledItems) {
+      for (const item of reconciledItems) {
+        if (!item.id || item.tripId !== tripId) {
+          throw new Error(`Invalid item for atomic update on trip: ${tripId}`)
+        }
+      }
+    }
+
+    // Snapshot existing trip and its child items for atomic rollback (protecting nested structures)
+    const previousTrip: Trip =
+      typeof structuredClone === 'function'
+        ? structuredClone(existing)
+        : JSON.parse(JSON.stringify(existing))
+    const previousItems = new Map<string, PackingItem>()
+    for (const [itemId, item] of this.state.items.entries()) {
+      if (item.tripId === tripId) {
+        previousItems.set(itemId, { ...item })
+      }
+    }
+
+    try {
+      const updated: Trip = {
+        ...existing,
+        ...tripUpdates,
+        id: tripId,
+        updatedAt: new Date().toISOString(),
+      }
+      this.state.trips.set(tripId, updated)
+
+      // Delete existing items for this trip only
+      for (const itemId of previousItems.keys()) {
+        this.state.items.delete(itemId)
+      }
+
+      // Insert reconciled items
+      if (reconciledItems) {
+        for (const item of reconciledItems) {
+          this.state.items.set(item.id, { ...item })
+        }
+      }
+    } catch (err) {
+      // Rollback to prior snapshot
+      this.state.trips.set(tripId, previousTrip)
+      for (const [itemId, item] of this.state.items.entries()) {
+        if (item.tripId === tripId) {
+          this.state.items.delete(itemId)
+        }
+      }
+      for (const [itemId, item] of previousItems.entries()) {
+        this.state.items.set(itemId, item)
+      }
+      throw err
+    }
+  }
+
   async deleteTrip(id: string): Promise<void> {
     this.state.trips.delete(id)
     // Cascade delete associated items to prevent orphaned records
